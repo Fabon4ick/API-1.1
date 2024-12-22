@@ -1,21 +1,12 @@
-import os
-import shutil
-from msilib.schema import File
-
-import aiofiles
-from fastapi import FastAPI, HTTPException, UploadFile, File, Depends
-from sqlalchemy.orm import Session, sessionmaker
 from database import *
 from datetime import datetime
-import pydantic
 from pydantic import BaseModel
-from typing import Dict, List, Optional
+from typing import List, Optional
 import datetime as dt
 import base64
 import logging
-from fastapi import FastAPI, HTTPException
-from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
+from fastapi import FastAPI, HTTPException, Depends
+from sqlalchemy.orm import Session, sessionmaker
 
 app = FastAPI()
 
