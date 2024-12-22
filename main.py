@@ -62,6 +62,7 @@ class FeedbackRequest(BaseModel):
     userId: int
     staffId: int
     comment: str
+    rating: int
 
 class DiseaseRequest(BaseModel):
     userId: int
@@ -276,7 +277,8 @@ async def add_feedback(feedback: FeedbackRequest, db: Session = Depends(get_db))
     new_feedback = Feedback(
         userId=feedback.userId,  # Использование правильного имени userId
         staffId=feedback.staffId,
-        comment=feedback.comment
+        comment=feedback.comment,
+        rating=feedback.rating
     )
 
     db.add(new_feedback)

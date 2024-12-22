@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Date, Boolean, ForeignKey, Text, LargeBinary, create_engine
+from sqlalchemy import Column, Integer, String, Date, Boolean, ForeignKey, Text, LargeBinary, create_engine, Float
 from sqlalchemy.orm import relationship, DeclarativeBase
 import psycopg2
 
@@ -62,6 +62,7 @@ class Feedback(Base):
     userId = Column(Integer, ForeignKey('User.id'), nullable=False)
     staffId = Column(Integer, ForeignKey('Staff.id'), nullable=False)
     comment = Column(Text, nullable=False)
+    rating = Column(Integer, nullable=False)
 
     user = relationship("User", back_populates="feedbacks")
     staff = relationship("Staff", back_populates="feedbacks")
@@ -83,6 +84,7 @@ class Staff(Base):
     birth = Column(Date, nullable=False)
     employmentDay = Column(Date, nullable=False)
     bio = Column(Text, nullable=False)
+    averageRating = Column(Float, nullable=True)
 
     applications = relationship("Application", back_populates="staff")
     feedbacks = relationship("Feedback", back_populates="staff")
