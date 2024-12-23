@@ -25,11 +25,11 @@ class user_response(BaseModel):
     whenGet: datetime
     departmentCode: int
     photo: str = None
-    address: str
-    disabilityCategoriesId: int
-    civilCategoryId: int
-    pensionAmount: int
-    familyStatusId: int
+    address: Optional[str] = None
+    disabilityCategoriesId: Optional[int] = None
+    civilCategoryId: Optional[int] = None
+    pensionAmount: Optional[int] = None
+    familyStatusId: Optional[int] = None
 
     class Config:
         orm_mode = True
@@ -304,6 +304,35 @@ async def add_disease(disease_request: DiseaseRequest, db: Session = Depends(get
         raise HTTPException(status_code=500, detail=f"Error saving to database: {e}")
 
     return {"message": "Disease successfully added", "disease_id": new_disease.id}
+
+@app.put('/update_user/{user_id}', response_model=user_response)
+def update_user(user_id: int, user: user_response, db: Session = Depends(get_db)):
+    # Получаем пользователя из базы данных
+    existing_user = db.query(User).filter(User.id == user_id).first()
+
+    if not existing_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Обновляем только нужные поля
+    if user.address is not None:
+        existing_user.address = user.address
+    if user.disabilityCategoriesId is not None:
+        existing_user.disabilityCategoriesId = user.disabilityCategoriesId
+    if user.civilCategoryId is not None:
+        existing_user.civilCategoryId = user.civilCategoryId
+    if user.pensionAmount is not None:
+        existing_user.pensionAmount = user.pensionAmount
+    if user.familyStatusId is not None:
+        existing_user.familyStatusId = user.familyStatusId
+
+    try:
+        db.commit()
+        db.refresh(existing_user)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error saving to database: {e}")
+
+    return existing_user
 
 # --host 100.70.255.173
 
