@@ -108,6 +108,7 @@ class User(Base):
     civilCategoryId = Column(Integer, ForeignKey('CivilCategory.id'), nullable=True)
     pensionAmount = Column(Integer, nullable=True)
     familyStatusId = Column(Integer, ForeignKey('FamilyStatus.id'), nullable=True)
+    password = Column(String(30), nullable=False)
 
     applications = relationship("Application", back_populates="user")
     existingDiseases = relationship("ExistingDisease", back_populates="user")
@@ -116,6 +117,6 @@ class User(Base):
     disabilityCategorie = relationship("DisabilityCategorie", back_populates="users")
     familyStatus = relationship("FamilyStatus", back_populates="users")
 
-engine = create_engine("postgresql://danil:OaLJxE8DHK7aLv3uJ2aHPGdsAnyLks0i@dpg-ctku22ij1k6c73csk9rg-a:5432/socialcompass_q15f", echo=True)
+engine = create_engine("postgresql://danil:hxhsbcHynjr9BTBpUlJS2yk7BjnXXeJj@dpg-ctlhk4tds78s73c6trv0-a.frankfurt-postgres.render.com:5432/socialcompass", echo=True)
 
 Base.metadata.create_all(engine)

@@ -30,6 +30,7 @@ class user_response(BaseModel):
     civilCategoryId: Optional[int] = None
     pensionAmount: Optional[int] = None
     familyStatusId: Optional[int] = None
+    password: str
 
     class Config:
         orm_mode = True
@@ -76,9 +77,9 @@ async def connection_test():
         "message" : "Подключение установленно"
     }
 
-@app.get("/user/{passport_series}/{passport_number}", response_model=user_response)
-def get_user_by_passport(passport_series: str, passport_number: str, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.passportSeries == passport_series, User.passportNumber == passport_number).first()
+@app.get("/user/{phone_number}/{password}", response_model=user_response)
+def get_user_by_passport(phone_number: str, password: str, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.phoneNumber == phone_number, User.password == password).first()
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
     return user
@@ -220,7 +221,8 @@ def add_user(user: user_response, db: Session = Depends(get_db)):
         disabilityCategoriesId=user.disabilityCategoriesId,
         civilCategoryId=user.civilCategoryId,
         pensionAmount=user.pensionAmount,
-        familyStatusId=user.familyStatusId
+        familyStatusId=user.familyStatusId,
+        password=user.password
     )
 
     try:
@@ -305,6 +307,7 @@ async def add_disease(disease_request: DiseaseRequest, db: Session = Depends(get
 
     return {"message": "Disease successfully added", "disease_id": new_disease.id}
 
+
 @app.put('/update_user/{user_id}', response_model=user_response)
 def update_user(user_id: int, user: user_response, db: Session = Depends(get_db)):
     # Получаем пользователя из базы данных
@@ -314,6 +317,26 @@ def update_user(user_id: int, user: user_response, db: Session = Depends(get_db)
         raise HTTPException(status_code=404, detail="User not found")
 
     # Обновляем только нужные поля
+    if user.name is not None:
+        existing_user.name = user.name
+    if user.surname is not None:
+        existing_user.surname = user.surname
+    if user.patronymic is not None:
+        existing_user.patronymic = user.patronymic
+    if user.phoneNumber is not None:
+        existing_user.phoneNumber = user.phoneNumber
+    if user.birthday is not None:
+        existing_user.birthday = user.birthday
+    if user.passportSeries is not None:
+        existing_user.passportSeries = user.passportSeries
+    if user.passportNumber is not None:
+        existing_user.passportNumber = user.passportNumber
+    if user.whoGave is not None:
+        existing_user.whoGave = user.whoGave
+    if user.whenGet is not None:
+        existing_user.whenGet = user.whenGet
+    if user.departmentCode is not None:
+        existing_user.departmentCode = user.departmentCode
     if user.address is not None:
         existing_user.address = user.address
     if user.disabilityCategoriesId is not None:
@@ -324,13 +347,23 @@ def update_user(user_id: int, user: user_response, db: Session = Depends(get_db)
         existing_user.pensionAmount = user.pensionAmount
     if user.familyStatusId is not None:
         existing_user.familyStatusId = user.familyStatusId
+    if user.password is not None:
+        existing_user.password = user.password
+
+    # Обработка поля photo
+    if user.photo is not None:
+        try:
+            # Декодируем строку Base64 в массив байтов
+            existing_user.photo = base64.b64decode(user.photo)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Ошибка декодирования фото: {e}")
 
     try:
         db.commit()
         db.refresh(existing_user)
     except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error saving to database: {e}")
+        db.rollback()  # Откат транзакции в случае ошибки
+        raise HTTPException(status_code=500, detail=f"Ошибка обновления данных в базе: {e}")
 
     return existing_user
 
