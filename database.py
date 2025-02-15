@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, Date, Boolean, ForeignKey, Text, LargeBinary, create_engine, Float
+from sqlalchemy import Column, Integer, String, Date, Boolean, ForeignKey, Text, LargeBinary, create_engine, Float, \
+    engine
 from sqlalchemy.orm import relationship, DeclarativeBase
 import psycopg2
 
