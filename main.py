@@ -1,5 +1,3 @@
-from sqlalchemy import engine
-
 from database import *
 from datetime import datetime
 from pydantic import BaseModel
@@ -9,10 +7,19 @@ import base64
 import logging
 from fastapi import FastAPI, HTTPException, Depends
 from sqlalchemy.orm import Session, sessionmaker
+from datetime import date
 
 app = FastAPI()
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+TABLE_MODELS = {
+    "civil_category": CivilCategory,
+    "disability_category": DisabilityCategorie,
+    "disease": Disease,
+    "family_status": FamilyStatus,
+    "service": Service,
+}
 
 class user_response(BaseModel):
     id: int
@@ -65,6 +72,31 @@ class DiseaseRequest(BaseModel):
     class Config:
         orm_mode = True
 
+class ApplicationUpdateSchema(BaseModel):
+    dateStart: dt.date
+    dateEnd: dt.date
+
+class StaffUpdate(BaseModel):
+    photo: Optional[bytes] = None
+    name: str
+    surname: str
+    patronymic: Optional[str] = None
+    birth: datetime
+    employmentDay: datetime
+    bio: str
+
+class StaffCreate(BaseModel):
+    photo: bytes | None = None
+    name: str
+    surname: str
+    patronymic: str | None = None
+    birth: date
+    employmentDay: date
+    bio: str
+
+class ItemRequest(BaseModel):
+    name: str
+
 def get_db():
     db = SessionLocal()
     try:
@@ -78,6 +110,295 @@ async def connection_test():
         "status" : 200,
         "message" : "Подключение установленно"
     }
+
+
+@app.delete("/{table_name}/{item_id}")
+async def delete_item(table_name: str, item_id: int, db: Session = Depends(get_db)):
+    print(f"Получен запрос на удаление: таблица={table_name}, ID={item_id}")  # Логируем запрос
+    model = TABLE_MODELS.get(table_name)
+
+    if not model:
+        raise HTTPException(status_code=400, detail="Неверное имя таблицы")
+
+    item = db.query(model).filter(model.id == item_id).first()
+
+    if not item:
+        raise HTTPException(status_code=404, detail="Элемент не найден")
+
+    db.delete(item)
+    db.commit()
+
+    return {"message": f"Элемент с ID {item_id} из таблицы {table_name} успешно удалён"}
+
+@app.get("/get_items/{table_name}")
+async def get_items(table_name: str, db: Session = Depends(get_db)):
+    # Проверяем, из какой таблицы нужно получить данные
+    if table_name == "civil_category":
+        items = db.query(CivilCategory).all()
+    elif table_name == "disability_category":
+        items = db.query(DisabilityCategorie).all()
+    elif table_name == "disease":
+        items = db.query(Disease).all()
+    elif table_name == "family_status":
+        items = db.query(FamilyStatus).all()
+    elif table_name == "service":
+        items = db.query(Service).all()
+    else:
+        raise HTTPException(status_code=400, detail="Неверное имя таблицы")
+
+    # Если таблица пуста, возвращаем сообщение
+    if not items:
+        return {"message": f"Нет данных в таблице {table_name}"}
+
+    # Возвращаем список записей
+    return {"data": items}
+
+@app.post("/add_item/{table_name}")
+async def add_item(table_name: str, item: ItemRequest, db: Session = Depends(get_db)):
+    try:
+        if table_name == "civil_category":
+            new_item = CivilCategory(name=item.name)
+            db.add(new_item)
+            db.commit()
+            db.refresh(new_item)
+            return {"message": "Категория гражданства добавлена", "id": new_item.id}
+
+        elif table_name == "disability_category":
+            new_item = DisabilityCategorie(name=item.name)
+            db.add(new_item)
+            db.commit()
+            db.refresh(new_item)
+            return {"message": "Категория инвалидности добавлена", "id": new_item.id}
+
+        elif table_name == "disease":
+            new_item = Disease(name=item.name)
+            db.add(new_item)
+            db.commit()
+            db.refresh(new_item)
+            return {"message": "Заболевание добавлено", "id": new_item.id}
+
+        elif table_name == "family_status":
+            new_item = FamilyStatus(name=item.name)
+            db.add(new_item)
+            db.commit()
+            db.refresh(new_item)
+            return {"message": "Семейное положение добавлено", "id": new_item.id}
+
+        elif table_name == "service":
+            new_item = Service(name=item.name)
+            db.add(new_item)
+            db.commit()
+            db.refresh(new_item)
+            return {"message": "Услуга добавлена", "id": new_item.id}
+
+        else:
+            raise HTTPException(status_code=400, detail="Неверное имя таблицы")
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Ошибка при добавлении элемента: {str(e)}")
+
+@app.post("/staffs/")
+async def create_staff(staff: StaffCreate, db: Session = Depends(get_db)):
+    new_staff = Staff(
+        photo=staff.photo,
+        name=staff.name,
+        surname=staff.surname,
+        patronymic=staff.patronymic,
+        birth=staff.birth,
+        employmentDay=staff.employmentDay,
+        bio=staff.bio,
+        averageRating=None  # Всегда устанавливаем NULL
+    )
+
+    db.add(new_staff)
+    db.commit()
+    db.refresh(new_staff)
+
+    return {"message": "Сотрудник успешно добавлен", "staff_id": new_staff.id}
+
+@app.put("/staffs/{staff_id}")
+async def update_staff(staff_id: int, staff_data: StaffUpdate, db: Session = Depends(get_db)):
+    staff = db.query(Staff).filter(Staff.id == staff_id).first()
+
+    if not staff:
+        raise HTTPException(status_code=404, detail="Сотрудник не найден")
+
+    # Обновляем только разрешённые поля
+    staff.photo = staff_data.photo if staff_data.photo is not None else staff.photo
+    staff.name = staff_data.name
+    staff.surname = staff_data.surname
+    staff.patronymic = staff_data.patronymic
+    staff.birth = staff_data.birth
+    staff.employmentDay = staff_data.employmentDay
+    staff.bio = staff_data.bio
+
+    db.commit()
+    db.refresh(staff)
+
+    return {"message": "Данные сотрудника успешно обновлены", "staff_id": staff.id}
+
+@app.delete("/staffs/{staff_id}")
+async def delete_staff(staff_id: int, db: Session = Depends(get_db)):
+    staff = db.query(Staff).filter(Staff.id == staff_id).first()
+
+    if not staff:
+        raise HTTPException(status_code=404, detail="Сотрудник не найден")
+
+    # Устанавливаем staffId в NULL во всех заявках, где есть этот сотрудник
+    db.query(Application).filter(Application.staffId == staff_id).update(
+        {"staffId": None}, synchronize_session=False
+    )
+    db.commit()
+
+    # Теперь удаляем сотрудника
+    db.delete(staff)
+    db.commit()
+
+    return {"message": "Сотрудник успешно удален, заявки обновлены"}
+
+@app.get("/applications")
+async def get_all_applications(db: Session = Depends(get_db)):
+    applications = (
+        db.query(Application, User, ExistingDisease, Disease, Staff, Service)
+        .join(User, Application.userId == User.id)
+        .join(Service, Application.requiredServicesId == Service.id)
+        .outerjoin(ExistingDisease, ExistingDisease.userId == User.id)
+        .outerjoin(Disease, ExistingDisease.diseaseId == Disease.id)
+        .outerjoin(Staff, Application.staffId == Staff.id)  # Изменено на outerjoin
+        .join(CivilCategory, User.civilCategoryId == CivilCategory.id)
+        .join(DisabilityCategorie, User.disabilityCategoriesId == DisabilityCategorie.id)
+        .join(FamilyStatus, User.familyStatusId == FamilyStatus.id)
+        .filter(Application.dateStart == date(1970, 1, 1), Application.dateEnd == date(1970, 1, 1))
+        .all()
+    )
+
+    result = []
+    for app, user, existing_disease, disease, staff, service in applications:
+        diseases = []
+        if existing_disease:
+            diseases.append(disease.name)
+
+        result.append({
+            "applicationId": app.id,
+            "user": {
+                "id": user.id,
+                "name": user.name,
+                "surname": user.surname,
+                "patronymic": user.patronymic,
+                "phoneNumber": user.phoneNumber,
+                "birthday": user.birthday.strftime("%Y-%m-%d"),
+                "passportSeries": user.passportSeries,
+                "passportNumber": user.passportNumber,
+                "whoGave": user.whoGave,
+                "whenGet": user.whenGet.strftime("%Y-%m-%d"),
+                "departmentCode": user.departmentCode,
+                "photo": user.photo,
+                "address": user.address,
+                "disabilityCategory": user.disabilityCategorie.name if user.disabilityCategorie else None,
+                "civilCategory": user.civilCategory.name if user.civilCategory else None,
+                "pensionAmount": user.pensionAmount,
+                "familyStatus": user.familyStatus.name if user.familyStatus else None
+            },
+            "service": service.name,
+            "existingDiseases": diseases,
+            "dateStart": app.dateStart.strftime("%Y-%m-%d"),
+            "dateEnd": app.dateEnd.strftime("%Y-%m-%d"),
+            "isHaveReabilitation": "Да" if app.isHaveReabilitation else "Нет",
+            "staff": {
+                "id": staff.id if staff else None,
+                "name": staff.name if staff else None,
+                "surname": staff.surname if staff else None,
+                "patronymic": staff.patronymic if staff else None
+            } if staff else None  # Проверяем, есть ли сотрудник
+        })
+
+    return result
+
+@app.get("/active-applications")
+async def get_active_applications(db: Session = Depends(get_db)):
+    today = date.today()
+
+    applications = (
+        db.query(Application, User, ExistingDisease, Disease, Staff, Service)
+        .join(User, Application.userId == User.id)
+        .join(Service, Application.requiredServicesId == Service.id)
+        .outerjoin(ExistingDisease, ExistingDisease.userId == User.id)
+        .outerjoin(Disease, ExistingDisease.diseaseId == Disease.id)
+        .outerjoin(Staff, Application.staffId == Staff.id)  # Изменено на outerjoin
+        .join(CivilCategory, User.civilCategoryId == CivilCategory.id)
+        .join(DisabilityCategorie, User.disabilityCategoriesId == DisabilityCategorie.id)
+        .join(FamilyStatus, User.familyStatusId == FamilyStatus.id)
+        .filter(Application.dateStart <= today, Application.dateEnd >= today)  # Фильтр по текущей дате
+        .all()
+    )
+
+    result = []
+    for app, user, existing_disease, disease, staff, service in applications:
+        diseases = []
+        if existing_disease:
+            diseases.append(disease.name)
+
+        result.append({
+            "applicationId": app.id,
+            "user": {
+                "id": user.id,
+                "name": user.name,
+                "surname": user.surname,
+                "patronymic": user.patronymic,
+                "phoneNumber": user.phoneNumber,
+                "birthday": user.birthday.strftime("%Y-%m-%d"),
+                "passportSeries": user.passportSeries,
+                "passportNumber": user.passportNumber,
+                "whoGave": user.whoGave,
+                "whenGet": user.whenGet.strftime("%Y-%m-%d"),
+                "departmentCode": user.departmentCode,
+                "photo": user.photo,
+                "address": user.address,
+                "disabilityCategory": user.disabilityCategorie.name if user.disabilityCategorie else None,
+                "civilCategory": user.civilCategory.name if user.civilCategory else None,
+                "pensionAmount": user.pensionAmount,
+                "familyStatus": user.familyStatus.name if user.familyStatus else None
+            },
+            "service": service.name,
+            "existingDiseases": diseases,
+            "dateStart": app.dateStart.strftime("%Y-%m-%d"),
+            "dateEnd": app.dateEnd.strftime("%Y-%m-%d"),
+            "isHaveReabilitation": "Да" if app.isHaveReabilitation else "Нет",
+            "staff": {
+                "id": staff.id if staff else None,
+                "name": staff.name if staff else None,
+                "surname": staff.surname if staff else None,
+                "patronymic": staff.patronymic if staff else None
+            } if staff else None  # Проверяем, есть ли сотрудник
+        })
+
+    return result
+
+
+@app.delete("/applications/{application_id}")
+async def delete_application(application_id: int, db: Session = Depends(get_db)):
+    application = db.query(Application).filter(Application.id == application_id).first()
+
+    if not application:
+        raise HTTPException(status_code=404, detail="Заявка не найдена")
+
+    db.delete(application)
+    db.commit()
+
+    return {"message": "Заявка успешно удалена"}
+
+@app.put("/applications/{application_id}")
+async def update_application(application_id: int, update_data: ApplicationUpdateSchema, db: Session = Depends(get_db)):
+    application = db.query(Application).filter(Application.id == application_id).first()
+
+    if not application:
+        raise HTTPException(status_code=404, detail="Заявка не найдена")
+
+    application.dateStart = update_data.dateStart
+    application.dateEnd = update_data.dateEnd
+    db.commit()
+    db.refresh(application)
+
+    return {"message": "Заявка успешно обновлена", "applicationId": application.id}
 
 @app.get("/user/{phone_number}/{password}", response_model=user_response)
 def get_user_by_passport(phone_number: str, password: str, db: Session = Depends(get_db)):
