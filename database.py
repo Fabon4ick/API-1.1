@@ -13,7 +13,7 @@ class Application(Base):
     isHaveReabilitation = Column(Boolean, nullable=False)
     dateStart = Column(Date, nullable=False)
     dateEnd = Column(Date, nullable=False)
-    staffId = Column(Integer, ForeignKey('Staff.id'), nullable=False)
+    staffId = Column(Integer, ForeignKey('Staff.id'), nullable=True)
 
     user = relationship("User", back_populates="applications")
     service = relationship("Service", back_populates="applications")
@@ -63,6 +63,7 @@ class Feedback(Base):
     staffId = Column(Integer, ForeignKey('Staff.id'), nullable=False)
     comment = Column(Text, nullable=False)
     rating = Column(Integer, nullable=False)
+    isVisible = Column(Boolean, default=True, nullable=False)
 
     user = relationship("User", back_populates="feedbacks")
     staff = relationship("Staff", back_populates="feedbacks")
@@ -84,6 +85,7 @@ class Staff(Base):
     birth = Column(Date, nullable=False)
     employmentDay = Column(Date, nullable=False)
     bio = Column(Text, nullable=False)
+    isVisible = Column(Boolean, default=True, nullable=False)
     averageRating = Column(Float, nullable=True)
 
     applications = relationship("Application", back_populates="staff")
