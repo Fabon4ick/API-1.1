@@ -1,16 +1,16 @@
 from sqlalchemy import or_, cast
+from starlette.responses import JSONResponse
 from database import *
+from database import Feedback, Application
 from datetime import datetime
 from pydantic import BaseModel
 from typing import List, Optional
 import datetime as dt
 import base64
 import logging
-from fastapi import FastAPI, HTTPException, Depends, Query
+from fastapi import FastAPI, HTTPException, Depends, Query, Path
 from sqlalchemy.orm import Session, sessionmaker, joinedload
 from datetime import date
-
-#Привет омлет
 
 app = FastAPI()
 
@@ -70,7 +70,7 @@ class FeedbackRequest(BaseModel):
 
 class DiseaseRequest(BaseModel):
     userId: int
-    diseaseId: int
+    diseaseIds: List[int]
 
     class Config:
         orm_mode = True
@@ -106,6 +106,9 @@ class ItemRequest(BaseModel):
 class ReplaceRequest(BaseModel):
     old_id: int
     new_id: int
+
+class FeedbackVisibilityUpdate(BaseModel):
+    isVisible: bool
 
 def get_db():
     db = SessionLocal()
@@ -145,9 +148,29 @@ async def replace_item(table_name: str, request: ReplaceRequest, db: Session = D
 
     return {"message": f"Элемент с ID {request.old_id} заменён на {request.new_id} и удалён"}
 
+@app.delete("/feedbacks/{id}")
+def delete_feedback(id: int, db: Session = Depends(get_db)):
+    feedback = db.query(Feedback).filter(Feedback.id == id).first()
+    if feedback == None:
+        return JSONResponse(status_code=404, content={ "message": "Отзыв не найден"})
+
+    db.delete(feedback)
+    db.commit()
+    return feedback
+
+@app.delete("/applications/{id}")
+def delete_application(id, db: Session = Depends(get_db)):
+    application = db.query(Application).filter(Application.id == id).first()
+    if application == None:
+        return JSONResponse(status_code=404, content={ "message": "Заявка не найдена"})
+
+    db.delete(application)
+    db.commit()
+    return application
+
 @app.delete("/{table_name}/{item_id}")
 async def delete_item(table_name: str, item_id: int, db: Session = Depends(get_db)):
-    print(f"Получен запрос на удаление: таблица={table_name}, ID={item_id}")  # Логируем запрос
+    print(f"Получен запрос на удаление: таблица={table_name}, ID={item_id}")
     model = TABLE_MODELS.get(table_name)
 
     if not model:
@@ -299,16 +322,64 @@ async def replace_and_delete_staff(request: ReplaceRequest, db: Session = Depend
         "updated_applications": updated_count
     }
 
+@app.get("/feedbacks")
+async def get_all_feedbacks(db: Session = Depends(get_db)):
+    feedbacks = (
+        db.query(Feedback, User, Staff)
+        .join(User, Feedback.userId == User.id)
+        .join(Staff, Feedback.staffId == Staff.id)
+        .filter(or_(Feedback.isVisible == True, Feedback.isVisible == None))
+        .all()
+    )
+
+    result = []
+    for feedback, user, staff in feedbacks:
+        result.append({
+            "commentId": feedback.id,
+            "user": {
+                "id": user.id,
+                "photo": user.photo,
+                "name": user.name,
+                "surname": user.surname,
+                "patronymic": user.patronymic
+            },
+            "comment": feedback.comment,
+            "rating": feedback.rating,
+            "isVisible": feedback.isVisible,
+            "staff": {
+                "id": staff.id if staff else None,
+                "name": staff.name if staff else None,
+                "surname": staff.surname if staff else None,
+                "patronymic": staff.patronymic if staff else None
+            }
+        })
+
+    return result
+
+@app.put("/feedbacks/{feedback_id}")
+async def update_feedback_visibility(
+    feedback_id: int = Path(..., description="ID комментария"),
+    visibility: FeedbackVisibilityUpdate = None,
+    db: Session = Depends(get_db)
+):
+    feedback = db.query(Feedback).filter(Feedback.id == feedback_id).first()
+
+    if not feedback:
+        raise HTTPException(status_code=404, detail="Комментарий не найден")
+
+    feedback.isVisible = visibility.isVisible
+    db.commit()
+
+    return {"message": "Статус видимости обновлён", "id": feedback.id, "isVisible": feedback.isVisible}
 
 @app.get("/applications")
 async def get_all_applications(db: Session = Depends(get_db)):
+    # Сначала получаем все заявки (уникальные)
     applications = (
-        db.query(Application, User, ExistingDisease, Disease, Staff, Service)
+        db.query(Application, User, Staff, Service)
         .join(User, Application.userId == User.id)
         .join(Service, Application.requiredServicesId == Service.id)
-        .outerjoin(ExistingDisease, ExistingDisease.userId == User.id)
-        .outerjoin(Disease, ExistingDisease.diseaseId == Disease.id)
-        .outerjoin(Staff, Application.staffId == Staff.id)  # Изменено на outerjoin
+        .outerjoin(Staff, Application.staffId == Staff.id)
         .join(CivilCategory, User.civilCategoryId == CivilCategory.id)
         .join(DisabilityCategorie, User.disabilityCategoriesId == DisabilityCategorie.id)
         .join(FamilyStatus, User.familyStatusId == FamilyStatus.id)
@@ -317,10 +388,15 @@ async def get_all_applications(db: Session = Depends(get_db)):
     )
 
     result = []
-    for app, user, existing_disease, disease, staff, service in applications:
-        diseases = []
-        if existing_disease:
-            diseases.append(disease.name)
+    for app, user, staff, service in applications:
+        # Отдельно получаем все болезни для текущего пользователя
+        diseases_query = (
+            db.query(Disease.name)
+            .join(ExistingDisease, ExistingDisease.diseaseId == Disease.id)
+            .filter(ExistingDisease.userId == user.id)
+            .all()
+        )
+        diseases = [d[0] for d in diseases_query]
 
         result.append({
             "applicationId": app.id,
@@ -353,7 +429,7 @@ async def get_all_applications(db: Session = Depends(get_db)):
                 "name": staff.name if staff else None,
                 "surname": staff.surname if staff else None,
                 "patronymic": staff.patronymic if staff else None
-            } if staff else None  # Проверяем, есть ли сотрудник
+            } if staff else None
         })
 
     return result
@@ -362,25 +438,30 @@ async def get_all_applications(db: Session = Depends(get_db)):
 async def get_active_applications(db: Session = Depends(get_db)):
     today = date.today()
 
+    # Получаем уникальные заявки, соответствующие текущей дате
     applications = (
-        db.query(Application, User, ExistingDisease, Disease, Staff, Service)
+        db.query(Application, User, Staff, Service)
         .join(User, Application.userId == User.id)
         .join(Service, Application.requiredServicesId == Service.id)
-        .outerjoin(ExistingDisease, ExistingDisease.userId == User.id)
-        .outerjoin(Disease, ExistingDisease.diseaseId == Disease.id)
-        .outerjoin(Staff, Application.staffId == Staff.id)  # Изменено на outerjoin
+        .outerjoin(Staff, Application.staffId == Staff.id)
         .join(CivilCategory, User.civilCategoryId == CivilCategory.id)
         .join(DisabilityCategorie, User.disabilityCategoriesId == DisabilityCategorie.id)
         .join(FamilyStatus, User.familyStatusId == FamilyStatus.id)
-        .filter(Application.dateStart <= today, Application.dateEnd >= today)  # Фильтр по текущей дате
+        .filter(Application.dateStart <= today, Application.dateEnd >= today)  # Фильтрация по текущей дате
+        .distinct(Application.id)  # Обеспечиваем уникальность заявок
         .all()
     )
 
     result = []
-    for app, user, existing_disease, disease, staff, service in applications:
-        diseases = []
-        if existing_disease:
-            diseases.append(disease.name)
+    for app, user, staff, service in applications:
+        # Получаем все заболевания для пользователя, чтобы избежать дублирования
+        diseases_query = (
+            db.query(Disease.name)
+            .join(ExistingDisease, ExistingDisease.diseaseId == Disease.id)
+            .filter(ExistingDisease.userId == user.id)
+            .all()
+        )
+        diseases = [d[0] for d in diseases_query]
 
         result.append({
             "applicationId": app.id,
@@ -413,7 +494,7 @@ async def get_active_applications(db: Session = Depends(get_db)):
                 "name": staff.name if staff else None,
                 "surname": staff.surname if staff else None,
                 "patronymic": staff.patronymic if staff else None
-            } if staff else None  # Проверяем, есть ли сотрудник
+            } if staff else None  # Проверка на наличие сотрудника
         })
 
     return result
@@ -512,18 +593,6 @@ async def search_applications(
 
     return result
 
-@app.delete("/applications/{application_id}")
-async def delete_application(application_id: int, db: Session = Depends(get_db)):
-    application = db.query(Application).filter(Application.id == application_id).first()
-
-    if not application:
-        raise HTTPException(status_code=404, detail="Заявка не найдена")
-
-    db.delete(application)
-    db.commit()
-
-    return {"message": "Заявка успешно удалена"}
-
 @app.put("/applications/{application_id}")
 async def update_application(application_id: int, update_data: ApplicationUpdateSchema, db: Session = Depends(get_db)):
     application = db.query(Application).filter(Application.id == application_id).first()
@@ -591,6 +660,12 @@ async def get_all_staffs():
         staff = db.query(Staff).all()
         return staff
 
+@app.get("/staffs/hidden")
+async def get_hidden_staffs():
+    with Session(bind=engine, autoflush=False) as db:
+        hidden_staff = db.query(Staff).filter(Staff.isVisible == False).all()
+        return hidden_staff
+
 @app.get("/existing_diseases")
 async def get_all_existing_diseases():
     with Session(bind=engine, autoflush=False) as db:
@@ -610,13 +685,13 @@ async def get_feedback_for_staff(staff_id: int):
             db.query(Feedback.comment, User.surname, User.name, User.patronymic, User.photo)
             .join(User, Feedback.userId == User.id)
             .filter(Feedback.staffId == staff_id)
+            .filter(Feedback.isVisible == False)
             .all()
         )
 
         if not feedbacks:
-            raise HTTPException(status_code=404, detail="No feedback found for the specified staff member")
+            raise HTTPException(status_code=404, detail="No hidden feedback found for the specified staff member")
 
-        # Преобразование данных в список словарей
         feedback_list = [
             {
                 "comment": feedback.comment,
@@ -731,12 +806,13 @@ async def add_feedback(feedback: FeedbackRequest, db: Session = Depends(get_db))
     if not user or not staff:
         raise HTTPException(status_code=404, detail="User or Staff not found")
 
-    # Создание нового отзыва
+    # Создание нового отзыва с isVisible = True
     new_feedback = Feedback(
-        userId=feedback.userId,  # Использование правильного имени userId
+        userId=feedback.userId,
         staffId=feedback.staffId,
         comment=feedback.comment,
-        rating=feedback.rating
+        rating=feedback.rating,
+        isVisible=True
     )
 
     db.add(new_feedback)
@@ -747,31 +823,33 @@ async def add_feedback(feedback: FeedbackRequest, db: Session = Depends(get_db))
 
 @app.post("/add_disease")
 async def add_disease(disease_request: DiseaseRequest, db: Session = Depends(get_db)):
-    # Проверка наличия пользователя и болезни
     user = db.query(User).filter(User.id == disease_request.userId).first()
-    disease = db.query(Disease).filter(Disease.id == disease_request.diseaseId).first()
-
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    if not disease:
-        raise HTTPException(status_code=404, detail="Disease not found")
 
-    # Создание новой записи о болезни для пользователя
-    new_disease = ExistingDisease(
-        userId=disease_request.userId,
-        diseaseId=disease_request.diseaseId
-    )
+    # Удаляем старые записи
+    db.query(ExistingDisease).filter(ExistingDisease.userId == disease_request.userId).delete()
+
+    # Добавляем новые записи
+    for disease_id in disease_request.diseaseIds:
+        disease = db.query(Disease).filter(Disease.id == disease_id).first()
+        if not disease:
+            db.rollback()
+            raise HTTPException(status_code=404, detail=f"Disease with id {disease_id} not found")
+
+        new_disease = ExistingDisease(
+            userId=disease_request.userId,
+            diseaseId=disease_id
+        )
+        db.add(new_disease)
 
     try:
-        db.add(new_disease)
         db.commit()
-        db.refresh(new_disease)
     except Exception as e:
-        db.rollback()  # Откат транзакции в случае ошибки
+        db.rollback()
         raise HTTPException(status_code=500, detail=f"Error saving to database: {e}")
 
-    return {"message": "Disease successfully added", "disease_id": new_disease.id}
-
+    return {"message": "Diseases successfully updated"}
 
 @app.put('/update_user/{user_id}', response_model=user_response)
 def update_user(user_id: int, user: user_response, db: Session = Depends(get_db)):
@@ -831,6 +909,10 @@ def update_user(user_id: int, user: user_response, db: Session = Depends(get_db)
         raise HTTPException(status_code=500, detail=f"Ошибка обновления данных в базе: {e}")
 
     return existing_user
+
+if __name__=="__main__":
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=8000)
 
 # --host 100.70.255.173
 
