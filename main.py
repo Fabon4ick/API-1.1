@@ -1,3 +1,5 @@
+from multiprocessing.sharedctypes import synchronized
+
 from sqlalchemy import or_, cast
 from starlette.responses import JSONResponse
 from database import *
@@ -22,6 +24,7 @@ TABLE_MODELS = {
     "disease": Disease,
     "family_status": FamilyStatus,
     "service": Service,
+    "application_duration": ApplicationDuration
 }
 
 class user_response(BaseModel):
@@ -54,6 +57,7 @@ class application_response(BaseModel):
     dateStart: datetime
     dateEnd: datetime
     staffId: int
+    durationId: int
 
 class FeedbackResponse(BaseModel):
     comment: str
@@ -133,10 +137,35 @@ async def replace_item(table_name: str, request: ReplaceRequest, db: Session = D
     old_item = db.query(model).filter(model.id == request.old_id).first()
     new_item = db.query(model).filter(model.id == request.new_id).first()
 
-    # Обновляем поле familyStatusId в User fgdfgdf
-    db.query(User).filter(User.familyStatusId == request.old_id).update(
-        {User.familyStatusId: request.new_id}, synchronize_session=False
-    )
+    if table_name == "family_status":
+        db.query(User).filter(User.familyStatusId == request.old_id).update(
+            {User.familyStatusId: request.new_id}, synchronize_session=False
+        )
+
+    elif table_name == "civil_category":
+        db.query(User).filter(User.civilCategoryId == request.old_id).update(
+            {User.civilCategoryId: request.new_id}, synchronize_session=False
+        )
+
+    elif table_name == "disability_category":
+        db.query(User).filter(User.disabilityCategoriesId == request.old_id).update(
+            {User.disabilityCategoriesId: request.new_id}, synchronize_session=False
+        )
+
+    elif table_name == "disease":
+        db.query(ExistingDisease).filter(ExistingDisease.diseaseId == request.old_id).update(
+            {ExistingDisease.diseaseId: request.new_id}, synchronize_session=False
+        )
+
+    elif table_name == "service":
+        db.query(Application).filter(Application.requiredServicesId == request.old_id).update(
+            {Application.requiredServicesId: request.new_id}, synchronize_session=False
+        )
+
+    elif table_name == "application_duration":
+        db.query(Application).filter(Application.durationId == request.old_id).update(
+            {Application.durationId: request.new_id}, synchronize_session=False
+        )
 
     db.commit()
 
@@ -199,6 +228,8 @@ async def get_items(table_name: str, db: Session = Depends(get_db)):
         items = db.query(FamilyStatus).all()
     elif table_name == "service":
         items = db.query(Service).all()
+    elif table_name == "application_duration":
+        items = db.query(ApplicationDuration).all()
     else:
         raise HTTPException(status_code=400, detail="Неверное имя таблицы")
 
@@ -242,6 +273,13 @@ async def add_item(table_name: str, item: ItemRequest, db: Session = Depends(get
 
         elif table_name == "service":
             new_item = Service(name=item.name)
+            db.add(new_item)
+            db.commit()
+            db.refresh(new_item)
+            return {"message": "Услуга добавлена", "id": new_item.id}
+
+        elif table_name == "application_duration":
+            new_item = ApplicationDuration(name=item.name)
             db.add(new_item)
             db.commit()
             db.refresh(new_item)
@@ -376,9 +414,10 @@ async def update_feedback_visibility(
 async def get_all_applications(db: Session = Depends(get_db)):
     # Сначала получаем все заявки (уникальные)
     applications = (
-        db.query(Application, User, Staff, Service)
+        db.query(Application, User, Staff, Service, ApplicationDuration)
         .join(User, Application.userId == User.id)
         .join(Service, Application.requiredServicesId == Service.id)
+        .join(ApplicationDuration, Application.durationId == ApplicationDuration.id)
         .outerjoin(Staff, Application.staffId == Staff.id)
         .join(CivilCategory, User.civilCategoryId == CivilCategory.id)
         .join(DisabilityCategorie, User.disabilityCategoriesId == DisabilityCategorie.id)
@@ -388,7 +427,7 @@ async def get_all_applications(db: Session = Depends(get_db)):
     )
 
     result = []
-    for app, user, staff, service in applications:
+    for app, user, staff, service, applicationDuration in applications:
         # Отдельно получаем все болезни для текущего пользователя
         diseases_query = (
             db.query(Disease.name)
@@ -420,6 +459,7 @@ async def get_all_applications(db: Session = Depends(get_db)):
                 "familyStatus": user.familyStatus.name if user.familyStatus else None
             },
             "service": service.name,
+            "applicationDuration": applicationDuration.name,
             "existingDiseases": diseases,
             "dateStart": app.dateStart.strftime("%Y-%m-%d"),
             "dateEnd": app.dateEnd.strftime("%Y-%m-%d"),
@@ -440,9 +480,10 @@ async def get_active_applications(db: Session = Depends(get_db)):
 
     # Получаем уникальные заявки, соответствующие текущей дате
     applications = (
-        db.query(Application, User, Staff, Service)
+        db.query(Application, User, Staff, Service, ApplicationDuration)
         .join(User, Application.userId == User.id)
         .join(Service, Application.requiredServicesId == Service.id)
+        .join(ApplicationDuration, Application.durationId == ApplicationDuration.id)
         .outerjoin(Staff, Application.staffId == Staff.id)
         .join(CivilCategory, User.civilCategoryId == CivilCategory.id)
         .join(DisabilityCategorie, User.disabilityCategoriesId == DisabilityCategorie.id)
@@ -453,7 +494,7 @@ async def get_active_applications(db: Session = Depends(get_db)):
     )
 
     result = []
-    for app, user, staff, service in applications:
+    for app, user, staff, service, applicationDuration in applications:
         # Получаем все заболевания для пользователя, чтобы избежать дублирования
         diseases_query = (
             db.query(Disease.name)
@@ -485,6 +526,7 @@ async def get_active_applications(db: Session = Depends(get_db)):
                 "familyStatus": user.familyStatus.name if user.familyStatus else None
             },
             "service": service.name,
+            "applicationDuration": applicationDuration.name,
             "existingDiseases": diseases,
             "dateStart": app.dateStart.strftime("%Y-%m-%d"),
             "dateEnd": app.dateEnd.strftime("%Y-%m-%d"),
@@ -510,6 +552,7 @@ async def search_applications(
         db.query(Application)
         .join(User, Application.userId == User.id)
         .join(Service, Application.requiredServicesId == Service.id)
+        .join(ApplicationDuration, Application.durationId == ApplicationDuration.id)
         .outerjoin(ExistingDisease, ExistingDisease.userId == User.id)
         .outerjoin(Disease, ExistingDisease.diseaseId == Disease.id)
         .outerjoin(Staff, Application.staffId == Staff.id)
@@ -535,6 +578,7 @@ async def search_applications(
                 cast(User.pensionAmount, String).ilike(f"%{search}%"),
                 FamilyStatus.name.ilike(f"%{search}%"),
                 Service.name.ilike(f"%{search}%"),
+                ApplicationDuration.name.ilike(f"%{search}%"),
                 Disease.name.ilike(f"%{search}%"),
                 Staff.name.ilike(f"%{search}%"),
                 Staff.surname.ilike(f"%{search}%"),
@@ -553,6 +597,7 @@ async def search_applications(
     for app in applications:
         user = app.user
         service = app.service
+        applicationDuration = app.duration
         staff = app.staff
 
         diseases = [d.disease.name for d in user.existingDiseases if d.disease] if user.existingDiseases else []
@@ -579,6 +624,7 @@ async def search_applications(
                 "familyStatus": user.familyStatus.name if user.familyStatus else None
             },
             "service": service.name if service else None,
+            "applicationDuration": applicationDuration.name if applicationDuration else None,
             "existingDiseases": diseases,
             "dateStart": app.dateStart.strftime("%Y-%m-%d"),
             "dateEnd": app.dateEnd.strftime("%Y-%m-%d"),
@@ -629,6 +675,12 @@ async def get_all_civil_categories():
     with Session(bind=engine, autoflush=False) as db:
         civil_category = db.query(CivilCategory).all()
         return civil_category
+
+@app.get("/application_duration")
+async def get_all_application_duration():
+    with Session(bind=engine, autoflush=False) as db:
+        application_duration = db.query(ApplicationDuration).all()
+        return application_duration
 
 @app.get("/disability_categories")
 async def get_all_disability_categories():
@@ -783,7 +835,8 @@ def add_application(application: application_response, db: Session = Depends(get
         isHaveReabilitation=application.isHaveReabilitation,
         dateStart=application.dateStart,
         dateEnd=application.dateEnd,
-        staffId=application.staffId
+        staffId=application.staffId,
+        durationId=application.durationId
     )
 
     try:

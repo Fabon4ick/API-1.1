@@ -13,18 +13,20 @@ class Application(Base):
     isHaveReabilitation = Column(Boolean, nullable=False)
     dateStart = Column(Date, nullable=False)
     dateEnd = Column(Date, nullable=False)
+    durationId = Column(Integer, ForeignKey('ApplicationDuration.id'), nullable=False)
     staffId = Column(Integer, ForeignKey('Staff.id'), nullable=True)
 
     user = relationship("User", back_populates="applications")
     service = relationship("Service", back_populates="applications")
     staff = relationship("Staff", back_populates="applications")
+    duration = relationship("ApplicationDuration", back_populates="applications")
 
-class CivilCategory(Base):
-    __tablename__ = 'CivilCategory'
+class ApplicationDuration(Base):
+    __tablename__ = 'ApplicationDuration'
     id = Column(Integer, primary_key=True, nullable=False, autoincrement=True)
-    name = Column(String(200), nullable=False)
+    name = Column(String(50), nullable=False)
 
-    users = relationship("User", back_populates="civilCategory")
+    applications = relationship("Application", back_populates="duration")
 
 class DisabilityCategorie(Base):
     __tablename__ = 'DisabilityCategorie'
@@ -90,6 +92,13 @@ class Staff(Base):
 
     applications = relationship("Application", back_populates="staff")
     feedbacks = relationship("Feedback", back_populates="staff")
+
+class CivilCategory(Base):
+    __tablename__ = 'CivilCategory'
+    id = Column(Integer, primary_key=True, nullable=False, autoincrement=True)
+    name = Column(String(200), nullable=False)
+
+    users = relationship("User", back_populates="civilCategory")
 
 class User(Base):
     __tablename__ = 'User'
