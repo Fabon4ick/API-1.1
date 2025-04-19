@@ -42,7 +42,6 @@ class user_response(BaseModel):
     photo: Optional[str] = None
     address: Optional[str] = None
     disabilityCategoriesId: Optional[int] = None
-    civilCategoryId: Optional[int] = None
     pensionAmount: Optional[int] = None
     familyStatusId: Optional[int] = None
     password: str
@@ -75,6 +74,13 @@ class FeedbackRequest(BaseModel):
 class DiseaseRequest(BaseModel):
     userId: int
     diseaseIds: List[int]
+
+    class Config:
+        orm_mode = True
+
+class CivilCategoryRequest(BaseModel):
+    userId: int
+    civilCategoryIds: List[int]
 
     class Config:
         orm_mode = True
@@ -143,8 +149,8 @@ async def replace_item(table_name: str, request: ReplaceRequest, db: Session = D
         )
 
     elif table_name == "civil_category":
-        db.query(User).filter(User.civilCategoryId == request.old_id).update(
-            {User.civilCategoryId: request.new_id}, synchronize_session=False
+        db.query(UserCivilCategory).filter(UserCivilCategory.civilCategoryId == request.old_id).update(
+            {UserCivilCategory.civilCategoryId: request.new_id}, synchronize_session=False
         )
 
     elif table_name == "disability_category":
@@ -419,7 +425,6 @@ async def get_all_applications(db: Session = Depends(get_db)):
         .join(Service, Application.requiredServicesId == Service.id)
         .join(ApplicationDuration, Application.durationId == ApplicationDuration.id)
         .outerjoin(Staff, Application.staffId == Staff.id)
-        .join(CivilCategory, User.civilCategoryId == CivilCategory.id)
         .join(DisabilityCategorie, User.disabilityCategoriesId == DisabilityCategorie.id)
         .join(FamilyStatus, User.familyStatusId == FamilyStatus.id)
         .filter(Application.dateStart == date(1970, 1, 1), Application.dateEnd == date(1970, 1, 1))
@@ -436,6 +441,14 @@ async def get_all_applications(db: Session = Depends(get_db)):
             .all()
         )
         diseases = [d[0] for d in diseases_query]
+
+        userCivilCategories_query = (
+            db.query(CivilCategory.name)
+            .join(UserCivilCategory, UserCivilCategory.civilCategoryId == CivilCategory.id)
+            .filter(UserCivilCategory.userId == user.id)
+            .all()
+        )
+        userCivilCategories = [d[0] for d in userCivilCategories_query]
 
         result.append({
             "applicationId": app.id,
@@ -454,12 +467,12 @@ async def get_all_applications(db: Session = Depends(get_db)):
                 "photo": user.photo,
                 "address": user.address,
                 "disabilityCategory": user.disabilityCategorie.name if user.disabilityCategorie else None,
-                "civilCategory": user.civilCategory.name if user.civilCategory else None,
                 "pensionAmount": user.pensionAmount,
                 "familyStatus": user.familyStatus.name if user.familyStatus else None
             },
             "service": service.name,
             "applicationDuration": applicationDuration.name,
+            "userCivilCategories": userCivilCategories,
             "existingDiseases": diseases,
             "dateStart": app.dateStart.strftime("%Y-%m-%d"),
             "dateEnd": app.dateEnd.strftime("%Y-%m-%d"),
@@ -485,7 +498,6 @@ async def get_active_applications(db: Session = Depends(get_db)):
         .join(Service, Application.requiredServicesId == Service.id)
         .join(ApplicationDuration, Application.durationId == ApplicationDuration.id)
         .outerjoin(Staff, Application.staffId == Staff.id)
-        .join(CivilCategory, User.civilCategoryId == CivilCategory.id)
         .join(DisabilityCategorie, User.disabilityCategoriesId == DisabilityCategorie.id)
         .join(FamilyStatus, User.familyStatusId == FamilyStatus.id)
         .filter(Application.dateStart <= today, Application.dateEnd >= today)  # Фильтрация по текущей дате
@@ -504,6 +516,14 @@ async def get_active_applications(db: Session = Depends(get_db)):
         )
         diseases = [d[0] for d in diseases_query]
 
+        userCivilCategories_query = (
+            db.query(CivilCategory.name)
+            .join(UserCivilCategory, UserCivilCategory.civilCategoryId == CivilCategory.id)
+            .filter(UserCivilCategory.userId == user.id)
+            .all()
+        )
+        userCivilCategories = [d[0] for d in userCivilCategories_query]
+
         result.append({
             "applicationId": app.id,
             "user": {
@@ -521,12 +541,12 @@ async def get_active_applications(db: Session = Depends(get_db)):
                 "photo": user.photo,
                 "address": user.address,
                 "disabilityCategory": user.disabilityCategorie.name if user.disabilityCategorie else None,
-                "civilCategory": user.civilCategory.name if user.civilCategory else None,
                 "pensionAmount": user.pensionAmount,
                 "familyStatus": user.familyStatus.name if user.familyStatus else None
             },
             "service": service.name,
             "applicationDuration": applicationDuration.name,
+            "userCivilCategories": userCivilCategories,
             "existingDiseases": diseases,
             "dateStart": app.dateStart.strftime("%Y-%m-%d"),
             "dateEnd": app.dateEnd.strftime("%Y-%m-%d"),
@@ -556,7 +576,8 @@ async def search_applications(
         .outerjoin(ExistingDisease, ExistingDisease.userId == User.id)
         .outerjoin(Disease, ExistingDisease.diseaseId == Disease.id)
         .outerjoin(Staff, Application.staffId == Staff.id)
-        .join(CivilCategory, User.civilCategoryId == CivilCategory.id)
+        .join(UserCivilCategory, UserCivilCategory.userId == User.id)
+        .join(CivilCategory, UserCivilCategory.civilCategoryId == CivilCategory.id)
         .join(DisabilityCategorie, User.disabilityCategoriesId == DisabilityCategorie.id)
         .join(FamilyStatus, User.familyStatusId == FamilyStatus.id)
         .filter(
@@ -602,6 +623,8 @@ async def search_applications(
 
         diseases = [d.disease.name for d in user.existingDiseases if d.disease] if user.existingDiseases else []
 
+        civilCategories = [d.civilCategory.name for d in user.userCivilCategories if d.civilCategory] if user.userCivilCategories else []
+
         result.append({
             "applicationId": app.id,
             "user": {
@@ -619,12 +642,12 @@ async def search_applications(
                 "photo": user.photo,
                 "address": user.address,
                 "disabilityCategory": user.disabilityCategorie.name if user.disabilityCategorie else None,
-                "civilCategory": user.civilCategory.name if user.civilCategory else None,
                 "pensionAmount": user.pensionAmount,
                 "familyStatus": user.familyStatus.name if user.familyStatus else None
             },
             "service": service.name if service else None,
             "applicationDuration": applicationDuration.name if applicationDuration else None,
+            "userCivilCategories": civilCategories,
             "existingDiseases": diseases,
             "dateStart": app.dateStart.strftime("%Y-%m-%d"),
             "dateEnd": app.dateEnd.strftime("%Y-%m-%d"),
@@ -811,7 +834,6 @@ def add_user(user: user_response, db: Session = Depends(get_db)):
         photo=photo,
         address=user.address,
         disabilityCategoriesId=user.disabilityCategoriesId,
-        civilCategoryId=user.civilCategoryId,
         pensionAmount=user.pensionAmount,
         familyStatusId=user.familyStatusId,
         password=user.password
@@ -873,6 +895,36 @@ async def add_feedback(feedback: FeedbackRequest, db: Session = Depends(get_db))
     db.refresh(new_feedback)
 
     return {"message": "Отзыв успешно добавлен", "feedback_id": new_feedback.id}
+
+@app.post("/add_civil_category")
+async def add_civil_category(civil_category_request: CivilCategoryRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == civil_category_request.userId).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Удаляем старые записи
+    db.query(UserCivilCategory).filter(UserCivilCategory.userId == civil_category_request.userId).delete()
+
+    # Добавляем новые записи
+    for civil_category_id in civil_category_request.civilCategoryIds:
+        civil_category = db.query(CivilCategory).filter(CivilCategory.id == civil_category_id).first()
+        if not civil_category:
+            db.rollback()
+            raise HTTPException(status_code=404, detail=f"Civil category with id {civil_category_id} not found")
+
+        new_relation = UserCivilCategory(
+            userId=civil_category_request.userId,
+            civilCategoryId=civil_category_id
+        )
+        db.add(new_relation)
+
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error saving to database: {e}")
+
+    return {"message": "Civil categories successfully updated"}
 
 @app.post("/add_disease")
 async def add_disease(disease_request: DiseaseRequest, db: Session = Depends(get_db)):
@@ -937,8 +989,6 @@ def update_user(user_id: int, user: user_response, db: Session = Depends(get_db)
         existing_user.address = user.address
     if user.disabilityCategoriesId is not None:
         existing_user.disabilityCategoriesId = user.disabilityCategoriesId
-    if user.civilCategoryId is not None:
-        existing_user.civilCategoryId = user.civilCategoryId
     if user.pensionAmount is not None:
         existing_user.pensionAmount = user.pensionAmount
     if user.familyStatusId is not None:

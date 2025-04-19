@@ -98,7 +98,16 @@ class CivilCategory(Base):
     id = Column(Integer, primary_key=True, nullable=False, autoincrement=True)
     name = Column(String(200), nullable=False)
 
-    users = relationship("User", back_populates="civilCategory")
+    userCivilCategories = relationship("UserCivilCategory", back_populates="civilCategory")
+
+class UserCivilCategory(Base):
+    __tablename__ = "UserCivilCategory"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    userId = Column(Integer, ForeignKey("User.id"), nullable=False)
+    civilCategoryId = Column(Integer, ForeignKey("CivilCategory.id"), nullable=False)
+
+    user = relationship("User", back_populates="userCivilCategories")
+    civilCategory = relationship("CivilCategory", back_populates="userCivilCategories")
 
 class User(Base):
     __tablename__ = 'User'
@@ -116,7 +125,6 @@ class User(Base):
     departmentCode = Column(Integer, nullable=False)
     address = Column(String(200), nullable=True)
     disabilityCategoriesId = Column(Integer, ForeignKey('DisabilityCategorie.id'), nullable=True)
-    civilCategoryId = Column(Integer, ForeignKey('CivilCategory.id'), nullable=True)
     pensionAmount = Column(Integer, nullable=True)
     familyStatusId = Column(Integer, ForeignKey('FamilyStatus.id'), nullable=True)
     password = Column(String(30), nullable=False)
@@ -124,7 +132,7 @@ class User(Base):
     applications = relationship("Application", back_populates="user")
     existingDiseases = relationship("ExistingDisease", back_populates="user")
     feedbacks = relationship("Feedback", back_populates="user")
-    civilCategory = relationship("CivilCategory", back_populates="users")
+    userCivilCategories = relationship("UserCivilCategory", back_populates="user")
     disabilityCategorie = relationship("DisabilityCategorie", back_populates="users")
     familyStatus = relationship("FamilyStatus", back_populates="users")
 
