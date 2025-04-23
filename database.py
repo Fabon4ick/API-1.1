@@ -9,7 +9,6 @@ class Application(Base):
     __tablename__ = 'Application'
     id = Column(Integer, primary_key=True, nullable=False, autoincrement=True)
     userId = Column(Integer, ForeignKey('User.id'), nullable=False)
-    requiredServicesId = Column(Integer, ForeignKey('Service.id'), nullable=False)
     isHaveReabilitation = Column(Boolean, nullable=False)
     dateStart = Column(Date, nullable=False)
     dateEnd = Column(Date, nullable=False)
@@ -17,9 +16,25 @@ class Application(Base):
     staffId = Column(Integer, ForeignKey('Staff.id'), nullable=True)
 
     user = relationship("User", back_populates="applications")
-    service = relationship("Service", back_populates="applications")
+    applicationServices = relationship("ApplicationService", back_populates="application")
     staff = relationship("Staff", back_populates="applications")
     duration = relationship("ApplicationDuration", back_populates="applications")
+
+class ApplicationService(Base):
+    __tablename__ = "ApplicationService"
+    id = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
+    applicationId = Column(Integer, ForeignKey("Application.id"), nullable=False)
+    serviceId = Column(Integer, ForeignKey("Service.id"), nullable=False)
+
+    application = relationship("Application", back_populates="applicationServices")
+    service = relationship("Service", back_populates="applicationServices")
+
+class Service(Base):
+    __tablename__ = 'Service'
+    id = Column(Integer, primary_key=True, nullable=False, autoincrement=True)
+    name = Column(String(200), nullable=False)
+
+    applicationServices = relationship("ApplicationService", back_populates="service")
 
 class ApplicationDuration(Base):
     __tablename__ = 'ApplicationDuration'
@@ -69,13 +84,6 @@ class Feedback(Base):
 
     user = relationship("User", back_populates="feedbacks")
     staff = relationship("Staff", back_populates="feedbacks")
-
-class Service(Base):
-    __tablename__ = 'Service'
-    id = Column(Integer, primary_key=True, nullable=False, autoincrement=True)
-    name = Column(String(200), nullable=False)
-
-    applications = relationship("Application", back_populates="service")
 
 class Staff(Base):
     __tablename__ = 'Staff'

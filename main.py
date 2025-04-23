@@ -50,8 +50,8 @@ class user_response(BaseModel):
         orm_mode = True
 
 class application_response(BaseModel):
+    id: Optional[int]
     userId: int
-    requiredServicesId: int
     isHaveReabilitation: bool
     dateStart: datetime
     dateEnd: datetime
@@ -81,6 +81,13 @@ class DiseaseRequest(BaseModel):
 class CivilCategoryRequest(BaseModel):
     userId: int
     civilCategoryIds: List[int]
+
+    class Config:
+        orm_mode = True
+
+class ServiceRequest(BaseModel):
+    applicationId: int
+    serviceIds: List[int]
 
     class Config:
         orm_mode = True
@@ -164,8 +171,8 @@ async def replace_item(table_name: str, request: ReplaceRequest, db: Session = D
         )
 
     elif table_name == "service":
-        db.query(Application).filter(Application.requiredServicesId == request.old_id).update(
-            {Application.requiredServicesId: request.new_id}, synchronize_session=False
+        db.query(ApplicationService).filter(ApplicationService.serviceId == request.old_id).update(
+            {ApplicationService.serviceId: request.new_id}, synchronize_session=False
         )
 
     elif table_name == "application_duration":
@@ -194,14 +201,15 @@ def delete_feedback(id: int, db: Session = Depends(get_db)):
     return feedback
 
 @app.delete("/applications/{id}")
-def delete_application(id, db: Session = Depends(get_db)):
+def delete_application(id: int, db: Session = Depends(get_db)):
     application = db.query(Application).filter(Application.id == id).first()
-    if application == None:
-        return JSONResponse(status_code=404, content={ "message": "Заявка не найдена"})
+    if application is None:
+        return JSONResponse(status_code=404, content={"message": "Заявка не найдена"})
 
-    db.delete(application)
+    db.query(ApplicationService).filter(ApplicationService.applicationId == id).delete()
+    db.query(Application).filter(Application.id == id).delete()
     db.commit()
-    return application
+    return {"message": "Заявка успешно удалена"}
 
 @app.delete("/{table_name}/{item_id}")
 async def delete_item(table_name: str, item_id: int, db: Session = Depends(get_db)):
@@ -420,9 +428,8 @@ async def update_feedback_visibility(
 async def get_all_applications(db: Session = Depends(get_db)):
     # Сначала получаем все заявки (уникальные)
     applications = (
-        db.query(Application, User, Staff, Service, ApplicationDuration)
+        db.query(Application, User, Staff, ApplicationDuration)
         .join(User, Application.userId == User.id)
-        .join(Service, Application.requiredServicesId == Service.id)
         .join(ApplicationDuration, Application.durationId == ApplicationDuration.id)
         .outerjoin(Staff, Application.staffId == Staff.id)
         .join(DisabilityCategorie, User.disabilityCategoriesId == DisabilityCategorie.id)
@@ -432,7 +439,7 @@ async def get_all_applications(db: Session = Depends(get_db)):
     )
 
     result = []
-    for app, user, staff, service, applicationDuration in applications:
+    for app, user, staff, applicationDuration in applications:
         # Отдельно получаем все болезни для текущего пользователя
         diseases_query = (
             db.query(Disease.name)
@@ -449,6 +456,14 @@ async def get_all_applications(db: Session = Depends(get_db)):
             .all()
         )
         userCivilCategories = [d[0] for d in userCivilCategories_query]
+
+        applicationServices_query = (
+            db.query(Service.name)
+            .join(ApplicationService, ApplicationService.serviceId == Service.id)
+            .filter(ApplicationService.applicationId == app.id)
+            .all()
+        )
+        applicationServices = [d[0] for d in applicationServices_query]
 
         result.append({
             "applicationId": app.id,
@@ -470,7 +485,7 @@ async def get_all_applications(db: Session = Depends(get_db)):
                 "pensionAmount": user.pensionAmount,
                 "familyStatus": user.familyStatus.name if user.familyStatus else None
             },
-            "service": service.name,
+            "applicationServices": applicationServices,
             "applicationDuration": applicationDuration.name,
             "userCivilCategories": userCivilCategories,
             "existingDiseases": diseases,
@@ -493,9 +508,8 @@ async def get_active_applications(db: Session = Depends(get_db)):
 
     # Получаем уникальные заявки, соответствующие текущей дате
     applications = (
-        db.query(Application, User, Staff, Service, ApplicationDuration)
+        db.query(Application, User, Staff, ApplicationDuration)
         .join(User, Application.userId == User.id)
-        .join(Service, Application.requiredServicesId == Service.id)
         .join(ApplicationDuration, Application.durationId == ApplicationDuration.id)
         .outerjoin(Staff, Application.staffId == Staff.id)
         .join(DisabilityCategorie, User.disabilityCategoriesId == DisabilityCategorie.id)
@@ -506,7 +520,7 @@ async def get_active_applications(db: Session = Depends(get_db)):
     )
 
     result = []
-    for app, user, staff, service, applicationDuration in applications:
+    for app, user, staff, applicationDuration in applications:
         # Получаем все заболевания для пользователя, чтобы избежать дублирования
         diseases_query = (
             db.query(Disease.name)
@@ -523,6 +537,14 @@ async def get_active_applications(db: Session = Depends(get_db)):
             .all()
         )
         userCivilCategories = [d[0] for d in userCivilCategories_query]
+
+        applicationServices_query = (
+            db.query(Service.name)
+            .join(ApplicationService, ApplicationService.serviceId == Service.id)
+            .filter(ApplicationService.applicationId == app.id)
+            .all()
+        )
+        applicationServices = [d[0] for d in applicationServices_query]
 
         result.append({
             "applicationId": app.id,
@@ -544,7 +566,7 @@ async def get_active_applications(db: Session = Depends(get_db)):
                 "pensionAmount": user.pensionAmount,
                 "familyStatus": user.familyStatus.name if user.familyStatus else None
             },
-            "service": service.name,
+            "applicationServices": applicationServices,
             "applicationDuration": applicationDuration.name,
             "userCivilCategories": userCivilCategories,
             "existingDiseases": diseases,
@@ -571,7 +593,8 @@ async def search_applications(
     query = (
         db.query(Application)
         .join(User, Application.userId == User.id)
-        .join(Service, Application.requiredServicesId == Service.id)
+        .join(ApplicationService, ApplicationService.applicationId == Application.id)
+        .join(Service, ApplicationService.serviceId == Service.id)
         .join(ApplicationDuration, Application.durationId == ApplicationDuration.id)
         .outerjoin(ExistingDisease, ExistingDisease.userId == User.id)
         .outerjoin(Disease, ExistingDisease.diseaseId == Disease.id)
@@ -617,13 +640,14 @@ async def search_applications(
     result = []
     for app in applications:
         user = app.user
-        service = app.service
         applicationDuration = app.duration
         staff = app.staff
 
         diseases = [d.disease.name for d in user.existingDiseases if d.disease] if user.existingDiseases else []
 
         civilCategories = [d.civilCategory.name for d in user.userCivilCategories if d.civilCategory] if user.userCivilCategories else []
+
+        services = [d.service.name for d in app.applicationServices if d.service] if app.applicationServices else []
 
         result.append({
             "applicationId": app.id,
@@ -645,7 +669,7 @@ async def search_applications(
                 "pensionAmount": user.pensionAmount,
                 "familyStatus": user.familyStatus.name if user.familyStatus else None
             },
-            "service": service.name if service else None,
+            "applicationServices": services,
             "applicationDuration": applicationDuration.name if applicationDuration else None,
             "userCivilCategories": civilCategories,
             "existingDiseases": diseases,
@@ -711,8 +735,8 @@ async def get_all_disability_categories():
         disability_categorie = db.query(DisabilityCategorie).all()
         return disability_categorie
 
-@app.get("/necessary_services")
-async def get_all_necessary_services():
+@app.get("/services")
+async def get_all_services():
     with Session(bind=engine, autoflush=False) as db:
         necessary_service = db.query(Service).all()
         return necessary_service
@@ -806,6 +830,24 @@ def get_active_user_applications(user_id: int, db: Session = Depends(get_db)):
         for app in applications
     ]
 
+@app.get("/applications/any/{user_id}")
+def get_any_user_applications(user_id: int, db: Session = Depends(get_db)):
+    # Получаем все заявки пользователя по user_id
+    applications = db.query(Application).filter(
+        Application.userId == user_id
+    ).all()
+
+    # Возвращаем список заявок
+    return [
+        {
+            "dateStart": app.dateStart,
+            "dateEnd": app.dateEnd,
+            "userId": app.userId,
+            "staffId": app.staffId
+        }
+        for app in applications
+    ]
+
 @app.post('/add_user', response_model=user_response)
 def add_user(user: user_response, db: Session = Depends(get_db)):
     # Проверяем, передано ли фото
@@ -853,7 +895,6 @@ def add_application(application: application_response, db: Session = Depends(get
     # Создаем нового пользователя
     new_application = Application(
         userId=application.userId,
-        requiredServicesId=application.requiredServicesId,
         isHaveReabilitation=application.isHaveReabilitation,
         dateStart=application.dateStart,
         dateEnd=application.dateEnd,
@@ -869,8 +910,6 @@ def add_application(application: application_response, db: Session = Depends(get
         raise HTTPException(status_code=500, detail=f"Ошибка сохранения в базе данных: {e}")
 
     return new_application
-
-logging.basicConfig(level=logging.DEBUG)
 
 @app.post("/feedbacks")
 async def add_feedback(feedback: FeedbackRequest, db: Session = Depends(get_db)):
@@ -895,6 +934,34 @@ async def add_feedback(feedback: FeedbackRequest, db: Session = Depends(get_db))
     db.refresh(new_feedback)
 
     return {"message": "Отзыв успешно добавлен", "feedback_id": new_feedback.id}
+
+@app.post("/add_application_services")
+async def add_application_services(request: ServiceRequest, db: Session = Depends(get_db)):
+    application = db.query(Application).filter(Application.id == request.applicationId).first()
+    if not application:
+        raise HTTPException(status_code=404, detail="Application not found")
+
+    db.query(ApplicationService).filter(ApplicationService.applicationId == request.applicationId).delete()
+
+    for service_id in request.serviceIds:
+        service = db.query(Service).filter(Service.id == service_id).first()
+        if not service:
+            db.rollback()
+            raise HTTPException(status_code=404, detail=f"Service with id {service_id} not found")
+
+        new_relation = ApplicationService(
+            applicationId=request.applicationId,
+            serviceId=service_id
+        )
+        db.add(new_relation)
+
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error saving to database: {e}")
+
+    return {"message": "Services successfully updated for application"}
 
 @app.post("/add_civil_category")
 async def add_civil_category(civil_category_request: CivilCategoryRequest, db: Session = Depends(get_db)):
