@@ -1,3 +1,5 @@
+import json
+import os
 from multiprocessing.sharedctypes import synchronized
 
 from sqlalchemy import or_, cast
@@ -13,10 +15,53 @@ import logging
 from fastapi import FastAPI, HTTPException, Depends, Query, Path
 from sqlalchemy.orm import Session, sessionmaker, joinedload
 from datetime import date
+import requests
+import firebase_admin
+from firebase_admin import credentials
+from firebase_admin import messaging
+from dotenv import load_dotenv
 
 app = FastAPI()
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+load_dotenv()
+
+def initialize_firebase():
+    firebase_config = os.getenv('FIREBASE_CREDENTIALS_JSON')
+
+    if not firebase_config:
+        raise ValueError("Firebase credentials not found in environment variables")
+
+    try:
+        # Преобразуем JSON-строку в словарь
+        cred_dict = json.loads(firebase_config)
+        cred = credentials.Certificate(cred_dict)
+        firebase_admin.initialize_app(cred)
+        print("Firebase initialized successfully")
+    except json.JSONDecodeError:
+        raise ValueError("Invalid Firebase JSON configuration")
+    except Exception as e:
+        raise RuntimeError(f"Firebase initialization failed: {str(e)}")
+
+# Инициализируем при старте
+initialize_firebase()
+
+def send_notification_to_user(fcmToken: str, title: str, body: str) -> bool:
+    try:
+        message = messaging.Message(
+            notification=messaging.Notification(
+                title=title,
+                body=body,
+            ),
+            token=fcmToken,
+        )
+        response = messaging.send(message)
+        print(f"Notification sent to {fcmToken[:5]}...: {response}")
+        return True
+    except Exception as e:
+        print(f"Failed to send notification: {str(e)}")
+        return False
 
 TABLE_MODELS = {
     "civil_category": CivilCategory,
@@ -45,6 +90,7 @@ class user_response(BaseModel):
     pensionAmount: Optional[int] = None
     familyStatusId: Optional[int] = None
     password: str
+    fcmToken: Optional[str] = None
 
     class Config:
         orm_mode = True
@@ -140,6 +186,38 @@ async def connection_test():
         "status" : 200,
         "message" : "Подключение установленно"
     }
+
+def send_push_notification(token: str, title: str, body: str) -> bool:
+    server_key = os.getenv('FIREBASE_SERVER_KEY')
+    if not server_key:
+        print("Firebase server key not configured")
+        return False
+
+    url = 'https://fcm.googleapis.com/fcm/send'
+    headers = {
+        'Authorization': f'key={server_key}',
+        'Content-Type': 'application/json',
+    }
+    payload = {
+        'to': token,
+        'notification': {
+            'title': title,
+            'body': body
+        },
+        'priority': 'high',
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=payload)
+        if response.status_code == 200:
+            print(f"HTTP Notification sent to {token[:5]}...")
+            return True
+        else:
+            print(f"Failed to send: {response.status_code} - {response.text}")
+            return False
+    except Exception as e:
+        print(f"HTTP Notification error: {str(e)}")
+        return False
 
 @app.put("/replace_item/{table_name}")
 async def replace_item(table_name: str, request: ReplaceRequest, db: Session = Depends(get_db)):
@@ -687,22 +765,57 @@ async def search_applications(
     return result
 
 @app.put("/applications/{application_id}")
-async def update_application(application_id: int, update_data: ApplicationUpdateSchema, db: Session = Depends(get_db)):
+async def update_application(
+        application_id: int,
+        update_data: ApplicationUpdateSchema,
+        db: Session = Depends(get_db)
+):
     application = db.query(Application).filter(Application.id == application_id).first()
-
     if not application:
         raise HTTPException(status_code=404, detail="Заявка не найдена")
 
+    # Сохраняем старые значения для сравнения
+    old_values = {
+        'start': application.dateStart,
+        'end': application.dateEnd,
+        'staff': application.staffId
+    }
+
+    # Обновляем данные
     application.dateStart = update_data.dateStart
     application.dateEnd = update_data.dateEnd
-
-    if update_data.staffId is not None:  # Меняем работника, если передан новый ID
+    if update_data.staffId is not None:
         application.staffId = update_data.staffId
 
     db.commit()
     db.refresh(application)
 
-    return {"message": "Заявка успешно обновлена", "applicationId": application.id}
+    # Проверяем изменения
+    dates_changed = (old_values['start'] != application.dateStart or
+                     old_values['end'] != application.dateEnd)
+    staff_changed = (old_values['staff'] != application.staffId)
+
+    # Отправляем уведомление при изменениях
+    if dates_changed or staff_changed:
+        user = db.query(User).filter(User.id == application.userId).first()
+        if user and user.fcmToken:
+            notification_sent = send_notification_to_user(
+                fcmToken=user.fcmToken,
+                title="Обновление заявки",
+                body="Ваша заявка обновлена. Проверьте изменения!"
+            )
+
+            if not notification_sent:
+                print(f"Failed to send notification to user {user.id}")
+
+    return {
+        "message": "Заявка успешно обновлена",
+        "applicationId": application.id,
+        "changes": {
+            "dates": dates_changed,
+            "staff": staff_changed
+        }
+    }
 
 @app.get("/user/{phone_number}/{password}", response_model=user_response)
 def get_user_by_passport(phone_number: str, password: str, db: Session = Depends(get_db)):
@@ -878,7 +991,8 @@ def add_user(user: user_response, db: Session = Depends(get_db)):
         disabilityCategoriesId=user.disabilityCategoriesId,
         pensionAmount=user.pensionAmount,
         familyStatusId=user.familyStatusId,
-        password=user.password
+        password=user.password,
+        fcmToken=user.fcmToken
     )
 
     try:
@@ -1062,6 +1176,8 @@ def update_user(user_id: int, user: user_response, db: Session = Depends(get_db)
         existing_user.familyStatusId = user.familyStatusId
     if user.password is not None:
         existing_user.password = user.password
+    if user.fcmToken is not None:
+        existing_user.fcmToken = user.fcmToken
 
     # Обработка поля photo
     if user.photo is not None:

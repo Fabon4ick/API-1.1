@@ -136,6 +136,7 @@ class User(Base):
     pensionAmount = Column(Integer, nullable=True)
     familyStatusId = Column(Integer, ForeignKey('FamilyStatus.id'), nullable=True)
     password = Column(String(30), nullable=False)
+    fcmToken = Column(String, nullable=True)
 
     applications = relationship("Application", back_populates="user")
     existingDiseases = relationship("ExistingDisease", back_populates="user")
