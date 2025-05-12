@@ -27,6 +27,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 load_dotenv()
 
+
 def initialize_firebase():
     firebase_config = os.getenv('FIREBASE_CREDENTIALS_JSON')
 
@@ -38,11 +39,12 @@ def initialize_firebase():
         cred_dict = json.loads(firebase_config)
         cred = credentials.Certificate(cred_dict)
         firebase_admin.initialize_app(cred)
-        print("Firebase initialized successfully")
+        print("✅ Firebase initialized successfully")
     except json.JSONDecodeError:
         raise ValueError("Invalid Firebase JSON configuration")
     except Exception as e:
         raise RuntimeError(f"Firebase initialization failed: {str(e)}")
+
 
 # Инициализируем при старте
 initialize_firebase()
