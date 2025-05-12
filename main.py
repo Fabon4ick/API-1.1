@@ -774,7 +774,7 @@ async def update_application(
     if not application:
         raise HTTPException(status_code=404, detail="Заявка не найдена")
 
-    # Сохраняем старые значения для сравнения
+    # Сохраняем старые значения для сравненияывпы
     old_values = {
         'start': application.dateStart,
         'end': application.dateEnd,
