@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from multiprocessing.sharedctypes import synchronized
 
 from sqlalchemy import or_, cast
@@ -24,46 +25,6 @@ from dotenv import load_dotenv
 app = FastAPI()
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-load_dotenv()
-
-
-def initialize_firebase():
-    firebase_config = os.getenv('FIREBASE_CREDENTIALS_JSON')
-
-    if not firebase_config:
-        raise ValueError("Firebase credentials not found in environment variables")
-
-    try:
-        # Преобразуем JSON-строку в словарь
-        cred_dict = json.loads(firebase_config)
-        cred = credentials.Certificate(cred_dict)
-        firebase_admin.initialize_app(cred)
-        print("✅ Firebase initialized successfully")
-    except json.JSONDecodeError:
-        raise ValueError("Invalid Firebase JSON configuration")
-    except Exception as e:
-        raise RuntimeError(f"Firebase initialization failed: {str(e)}")
-
-
-# Инициализируем при старте
-initialize_firebase()
-
-def send_notification_to_user(fcmToken: str, title: str, body: str) -> bool:
-    try:
-        message = messaging.Message(
-            notification=messaging.Notification(
-                title=title,
-                body=body,
-            ),
-            token=fcmToken,
-        )
-        response = messaging.send(message)
-        print(f"Notification sent to {fcmToken[:5]}...: {response}")
-        return True
-    except Exception as e:
-        print(f"Failed to send notification: {str(e)}")
-        return False
 
 TABLE_MODELS = {
     "civil_category": CivilCategory,
@@ -189,36 +150,54 @@ async def connection_test():
         "message" : "Подключение установленно"
     }
 
-def send_push_notification(token: str, title: str, body: str) -> bool:
-    server_key = os.getenv('FIREBASE_SERVER_KEY')
-    if not server_key:
-        print("Firebase server key not configured")
+
+logger = logging.getLogger(__name__)
+
+async def send_notification_with_fallback(fcm_token: str, title: str, body: str) -> bool:
+    """Основная функция отправки с fallback механизмом"""
+    # Сначала пробуем через Firebase Admin
+    if send_notification_to_user(fcm_token, title, body):
+        return True
+
+    # Если не получилось, пробуем через HTTP API
+    return send_push_notification(fcm_token, title, body)
+
+def send_notification_to_user(fcm_token: str, title: str, body: str) -> bool:
+    """Отправка через Firebase Admin SDK"""
+    try:
+        message = messaging.Message(
+            notification=messaging.Notification(title=title, body=body),
+            token=fcm_token
+        )
+        messaging.send(message)
+        logger.info(f"Notification sent to {fcm_token[:5]}...")
+        return True
+    except Exception as e:
+        logger.error(f"Firebase Admin error: {str(e)}")
         return False
 
-    url = 'https://fcm.googleapis.com/fcm/send'
-    headers = {
-        'Authorization': f'key={server_key}',
-        'Content-Type': 'application/json',
-    }
-    payload = {
-        'to': token,
-        'notification': {
-            'title': title,
-            'body': body
-        },
-        'priority': 'high',
-    }
-
+def send_push_notification(token: str, title: str, body: str) -> bool:
+    """Fallback отправка через HTTP API"""
     try:
-        response = requests.post(url, headers=headers, json=payload)
-        if response.status_code == 200:
-            print(f"HTTP Notification sent to {token[:5]}...")
-            return True
-        else:
-            print(f"Failed to send: {response.status_code} - {response.text}")
-            return False
+        response = requests.post(
+            'https://fcm.googleapis.com/fcm/send',
+            headers={
+                'Authorization': f'key={os.getenv("FIREBASE_SERVER_KEY")}',
+                'Content-Type': 'application/json'
+            },
+            json={
+                'to': token,
+                'notification': {'title': title, 'body': body},
+                'priority': 'high'
+            },
+            timeout=5  # Таймаут для запроса
+        )
+        success = response.status_code == 200
+        if not success:
+            logger.error(f"FCM HTTP error: {response.status_code} - {response.text}")
+        return success
     except Exception as e:
-        print(f"HTTP Notification error: {str(e)}")
+        logger.error(f"FCM HTTP connection error: {str(e)}")
         return False
 
 @app.put("/replace_item/{table_name}")
@@ -766,28 +745,27 @@ async def search_applications(
 
     return result
 
+
 @app.put("/applications/{application_id}")
 async def update_application(
         application_id: int,
         update_data: ApplicationUpdateSchema,
         db: Session = Depends(get_db)
 ):
-    application = db.query(Application).filter(Application.id == application_id).first()
+    application = db.query(Application).get(application_id)
     if not application:
         raise HTTPException(status_code=404, detail="Заявка не найдена")
 
-    # Сохраняем старые значения для сравненияывпы
     old_values = {
         'start': application.dateStart,
         'end': application.dateEnd,
         'staff': application.staffId
     }
 
-    # Обновляем данные
+    # Применяем изменения
     application.dateStart = update_data.dateStart
     application.dateEnd = update_data.dateEnd
-    if update_data.staffId is not None:
-        application.staffId = update_data.staffId
+    application.staffId = update_data.staffId if update_data.staffId is not None else application.staffId
 
     db.commit()
     db.refresh(application)
@@ -796,26 +774,30 @@ async def update_application(
     dates_changed = (old_values['start'] != application.dateStart or
                      old_values['end'] != application.dateEnd)
     staff_changed = (old_values['staff'] != application.staffId)
+    today = datetime.now().date()
+    became_active = (dates_changed and
+                     application.dateStart <= today <= application.dateEnd and
+                     not (old_values['start'] <= today <= old_values['end']))
 
     # Отправляем уведомление при изменениях
     if dates_changed or staff_changed:
-        user = db.query(User).filter(User.id == application.userId).first()
+        user = db.query(User).get(application.userId)
         if user and user.fcmToken:
-            notification_sent = send_notification_to_user(
-                fcmToken=user.fcmToken,
-                title="Обновление заявки",
-                body="Ваша заявка обновлена. Проверьте изменения!"
-            )
+            message_body = ("Ваша заявка стала активной сегодня!" if became_active
+                            else "Ваша заявка обновлена. Проверьте изменения!")
 
-            if not notification_sent:
-                print(f"Failed to send notification to user {user.id}")
+            await send_notification_with_fallback(
+                fcm_token=user.fcmToken,
+                title="Обновление заявки",
+                body=message_body
+            )
 
     return {
         "message": "Заявка успешно обновлена",
-        "applicationId": application.id,
         "changes": {
-            "dates": dates_changed,
-            "staff": staff_changed
+            "dates_changed": dates_changed,
+            "staff_changed": staff_changed,
+            "became_active": became_active
         }
     }
 
