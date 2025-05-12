@@ -145,6 +145,6 @@ class User(Base):
     disabilityCategorie = relationship("DisabilityCategorie", back_populates="users")
     familyStatus = relationship("FamilyStatus", back_populates="users")
 
-engine = create_engine("postgresql://postgres:1234@localhost:5432/SocialCompass", echo=True)
+engine = create_engine("postgresql://danil:ZWR7ID0QUbaNQUkM4JQuBUfjxigeejq5@dpg-d0h53549c44c7381cro0-a.oregon-postgres.render.com/socialcompass_c2z9", echo=True)
 
 Base.metadata.create_all(engine)
