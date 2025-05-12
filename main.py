@@ -13,7 +13,7 @@ from typing import List, Optional
 import datetime as dt
 import base64
 import logging
-from fastapi import FastAPI, HTTPException, Depends, Query, Path
+from fastapi import HTTPException, Depends, Query, Path
 from sqlalchemy.orm import Session, sessionmaker, joinedload
 from datetime import date
 import requests
@@ -21,6 +21,15 @@ import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import messaging
 from dotenv import load_dotenv
+
+firebase_credentials = os.getenv("FIREBASE_CREDENTIALS_JSON")
+if not firebase_credentials:
+    raise ValueError("Не найдены Firebase credentials")
+
+cred = credentials.Certificate(json.loads(firebase_credentials))
+firebase_admin.initialize_app(cred)
+
+from fastapi import FastAPI
 
 app = FastAPI()
 
@@ -150,6 +159,19 @@ async def connection_test():
         "message" : "Подключение установленно"
     }
 
+
+@app.get("/test_firebase")
+async def test_firebase():
+    try:
+        # Пробуем отправить тестовое уведомление
+        message = messaging.Message(
+            token="тестовый_токен",
+            notification=messaging.Notification(title="Test", body="Test")
+        )
+        messaging.send(message)
+        return {"status": "Firebase инициализирован корректно"}
+    except Exception as e:
+        return {"error": str(e)}
 
 logger = logging.getLogger(__name__)
 
