@@ -764,7 +764,6 @@ async def search_applications(
 
     return result
 
-
 @app.put("/applications/{application_id}")
 async def update_application(
         application_id: int,
@@ -798,17 +797,14 @@ async def update_application(
                      application.dateStart <= today <= application.dateEnd and
                      not (old_values['start'] <= today <= old_values['end']))
 
-    # Отправляем уведомление при изменениях
-    if dates_changed or staff_changed:
+    # Отправляем уведомление только когда заявка становится активной
+    if became_active:
         user = db.query(User).get(application.userId)
         if user and user.fcmToken:
-            message_body = ("Ваша заявка стала активной сегодня!" if became_active
-                            else "Ваша заявка обновлена. Проверьте изменения!")
-
             await send_notification_with_fallback(
                 fcm_token=user.fcmToken,
-                title="Обновление заявки",
-                body=message_body
+                title="Статус заявки",
+                body="Ваша заявка была принята!"
             )
 
     return {
@@ -969,7 +965,8 @@ def get_any_user_applications(user_id: int, db: Session = Depends(get_db)):
 def add_user(user: user_response, db: Session = Depends(get_db)):
     existing_user = db.query(User).filter(
         User.passportSeries == user.passportSeries,
-        User.passportNumber == user.passportNumber
+        User.passportNumber == user.passportNumber,
+        User.phoneNumber == user.phoneNumber
     ).first()
 
     if existing_user:
