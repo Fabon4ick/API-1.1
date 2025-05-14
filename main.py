@@ -964,15 +964,24 @@ def get_any_user_applications(user_id: int, db: Session = Depends(get_db)):
 @app.post('/add_user', response_model=user_response)
 def add_user(user: user_response, db: Session = Depends(get_db)):
     existing_user = db.query(User).filter(
-        User.passportSeries == user.passportSeries,
-        User.passportNumber == user.passportNumber,
-        User.phoneNumber == user.phoneNumber
+        (User.passportSeries == user.passportSeries),
+        (User.passportNumber == user.passportNumber)
     ).first()
 
     if existing_user:
         raise HTTPException(
             status_code=400,
             detail="Пользователь с такими паспортными данными уже существует"
+        )
+
+    existing_phone = db.query(User).filter(
+        User.phoneNumber == user.phoneNumber
+    ).first()
+
+    if existing_phone:
+        raise HTTPException(
+            status_code=400,
+            detail="Этот номер телефона уже зарегистрирован"
         )
 
     # Проверяем, передано ли фото
