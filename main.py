@@ -176,7 +176,6 @@ async def test_firebase():
 logger = logging.getLogger(__name__)
 
 async def send_notification_with_fallback(fcm_token: str, title: str, body: str) -> bool:
-    """Основная функция отправки с fallback механизмом"""
     # Сначала пробуем через Firebase Admin
     if send_notification_to_user(fcm_token, title, body):
         return True
@@ -185,7 +184,6 @@ async def send_notification_with_fallback(fcm_token: str, title: str, body: str)
     return send_push_notification(fcm_token, title, body)
 
 def send_notification_to_user(fcm_token: str, title: str, body: str) -> bool:
-    """Отправка через Firebase Admin SDK"""
     try:
         message = messaging.Message(
             notification=messaging.Notification(title=title, body=body),
@@ -199,7 +197,6 @@ def send_notification_to_user(fcm_token: str, title: str, body: str) -> bool:
         return False
 
 def send_push_notification(token: str, title: str, body: str) -> bool:
-    """Fallback отправка через HTTP API"""
     try:
         response = requests.post(
             'https://fcm.googleapis.com/fcm/send',
@@ -967,8 +964,20 @@ def get_any_user_applications(user_id: int, db: Session = Depends(get_db)):
         for app in applications
     ]
 
+
 @app.post('/add_user', response_model=user_response)
 def add_user(user: user_response, db: Session = Depends(get_db)):
+    existing_user = db.query(User).filter(
+        User.passportSeries == user.passportSeries,
+        User.passportNumber == user.passportNumber
+    ).first()
+
+    if existing_user:
+        raise HTTPException(
+            status_code=400,
+            detail="Пользователь с такими паспортными данными уже существует"
+        )
+
     # Проверяем, передано ли фото
     if user.photo:
         try:
