@@ -14,11 +14,22 @@ class Application(Base):
     dateEnd = Column(Date, nullable=False)
     durationId = Column(Integer, ForeignKey('ApplicationDuration.id'), nullable=False)
     staffId = Column(Integer, ForeignKey('Staff.id'), nullable=True)
+    isRejected = Column(Boolean, default=False, nullable=False)
+    rejectedDate = Column(Date, nullable=True)
+    rejectionReasonId = Column(Integer, ForeignKey('RejectionReason.id'), nullable=True)
 
     user = relationship("User", back_populates="applications")
     applicationServices = relationship("ApplicationService", back_populates="application")
     staff = relationship("Staff", back_populates="applications")
     duration = relationship("ApplicationDuration", back_populates="applications")
+    rejectionReason = relationship("RejectionReason", back_populates="applications")
+
+class RejectionReason(Base):
+    __tablename__ = 'RejectionReason'
+    id = Column(Integer, primary_key=True, nullable=False, autoincrement=True)
+    name = Column(String(300), nullable=False)
+
+    applications = relationship("Application", back_populates="rejectionReason")
 
 class ApplicationService(Base):
     __tablename__ = "ApplicationService"
@@ -145,6 +156,6 @@ class User(Base):
     disabilityCategorie = relationship("DisabilityCategorie", back_populates="users")
     familyStatus = relationship("FamilyStatus", back_populates="users")
 
-engine = create_engine("postgresql://danil:ZWR7ID0QUbaNQUkM4JQuBUfjxigeejq5@dpg-d0h53549c44c7381cro0-a.oregon-postgres.render.com/socialcompass_c2z9", echo=True)
+engine = create_engine("postgresql://danil:f2RzYD7qgAryPyi088U0c2CEYpPAFXaL@dpg-d0iqe02dbo4c738pb0eg-a.oregon-postgres.render.com/socialcompass_d4we", echo=True)
 
 Base.metadata.create_all(engine)
