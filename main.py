@@ -852,7 +852,7 @@ async def reject_application(id: int, data: RejectionData, background_tasks: Bac
 
 @app.get("/applications/{user_id}/rejection")
 def get_user_rejection_reason(user_id: int, db: Session = Depends(get_db)):
-    # Получить все отклонённые заявки пользователя
+    # Получить отклонённые заявки пользователя с указанной причиной
     rejected_apps = db.query(Application).filter(
         Application.userId == user_id,
         Application.isRejected == True,
@@ -862,17 +862,7 @@ def get_user_rejection_reason(user_id: int, db: Session = Depends(get_db)):
     if not rejected_apps:
         return {"message": "Нет отклонённых заявок"}
 
-    return [
-        {
-            "applicationId": app.id,
-            "dateStart": app.dateStart,
-            "dateEnd": app.dateEnd,
-            "rejectedDate": app.rejectedDate,
-            "rejectionReasonId": app.rejectionReasonId,
-            "rejectionReason": app.rejectionReason.name if app.rejectionReason else "Причина не указана"
-        }
-        for app in rejected_apps
-    ]
+    return [app.rejectionReason.name if app.rejectionReason else "Причина не указана" for app in rejected_apps]
 
 @app.get("/user/{phone_number}/{password}", response_model=user_response)
 def get_user_by_passport(phone_number: str, password: str, db: Session = Depends(get_db)):
