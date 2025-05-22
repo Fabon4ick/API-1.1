@@ -829,6 +829,31 @@ async def update_application(
         }
     }
 
+@app.put("/applications/{id}/reject")
+async def reject_application(
+    id: int,
+    data: RejectionData,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    application = db.query(Application).filter(Application.id == id).first()
+    if application is None:
+        raise HTTPException(status_code=404, detail="Заявка не найдена")
+
+    application.isRejected = True
+    application.rejectedDate = data.rejectedDate
+    application.rejectionReasonId = data.rejectionReasonId
+    db.commit()
+
+    # Получаем токен пользователя
+    user = db.query(User).filter(User.id == application.userId).first()
+    if user and user.fcmToken:
+        title = "Заявка отклонена"
+        body = "Ваша заявка была отклонена. Посмотрите причину в приложении."
+        background_tasks.add_task(send_notification_with_fallback, user.fcmToken, title, body)
+
+    return {"message": "Заявка отклонена успешно"}
+
 @app.get("/user/{phone_number}/{password}", response_model=user_response)
 def get_user_by_passport(phone_number: str, password: str, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.phoneNumber == phone_number, User.password == password).first()
