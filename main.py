@@ -13,7 +13,7 @@ from typing import List, Optional
 import datetime as dt
 import base64
 import logging
-from fastapi import HTTPException, Depends, Query, Path
+from fastapi import HTTPException, Depends, Query, Path, BackgroundTasks
 from sqlalchemy.orm import Session, sessionmaker, joinedload
 from datetime import date
 import requests
@@ -22,12 +22,12 @@ from firebase_admin import credentials
 from firebase_admin import messaging
 from dotenv import load_dotenv
 
-firebase_credentials = os.getenv("FIREBASE_CREDENTIALS_JSON")
-if not firebase_credentials:
-    raise ValueError("Не найдены Firebase credentials")
+#firebase_credentials = os.getenv("FIREBASE_CREDENTIALS_JSON")
+#if not firebase_credentials:
+#    raise ValueError("Не найдены Firebase credentials")
 
-cred = credentials.Certificate(json.loads(firebase_credentials))
-firebase_admin.initialize_app(cred)
+#cred = credentials.Certificate(json.loads(firebase_credentials))
+#firebase_admin.initialize_app(cred)
 
 from fastapi import FastAPI
 
@@ -41,7 +41,8 @@ TABLE_MODELS = {
     "disease": Disease,
     "family_status": FamilyStatus,
     "service": Service,
-    "application_duration": ApplicationDuration
+    "application_duration": ApplicationDuration,
+    "rejection_reason": RejectionReason
 }
 
 class user_response(BaseModel):
@@ -75,6 +76,9 @@ class application_response(BaseModel):
     dateEnd: datetime
     staffId: int
     durationId: int
+    isRejected: bool
+    rejectedDate: Optional[date] = None
+    rejectionReasonId: Optional[int] = None
 
 class FeedbackResponse(BaseModel):
     comment: str
@@ -145,6 +149,10 @@ class ReplaceRequest(BaseModel):
 class FeedbackVisibilityUpdate(BaseModel):
     isVisible: bool
 
+class RejectionData(BaseModel):
+    rejectedDate: date
+    rejectionReasonId: int
+
 def get_db():
     db = SessionLocal()
     try:
@@ -159,6 +167,30 @@ async def connection_test():
         "message" : "Подключение установленно"
     }
 
+@app.put("/applications/{id}/reject")
+def reject_application(
+    id: int,
+    data: RejectionData,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    application = db.query(Application).filter(Application.id == id).first()
+    if application is None:
+        raise HTTPException(status_code=404, detail="Заявка не найдена")
+
+    application.isRejected = True
+    application.rejectedDate = data.rejectedDate
+    application.rejectionReasonId = data.rejectionReasonId
+    db.commit()
+
+    # Получаем токен пользователя
+    user = db.query(User).filter(User.id == application.userId).first()
+    if user and user.fcmToken:
+        title = "Заявка отклонена"
+        body = "Ваша заявка была отклонена. Посмотрите причину в приложении."
+        background_tasks.add_task(send_notification_with_fallback, user.fcmToken, title, body)
+
+    return {"message": "Заявка отклонена успешно"}
 
 @app.get("/test_firebase")
 async def test_firebase():
@@ -257,6 +289,10 @@ async def replace_item(table_name: str, request: ReplaceRequest, db: Session = D
         db.query(Application).filter(Application.durationId == request.old_id).update(
             {Application.durationId: request.new_id}, synchronize_session=False
         )
+    elif table_name == "rejection_reason":
+        db.query(Application).filter(Application.rejectionReasonId == request.old_id).update(
+            {Application.rejectionReasonId: request.new_id}, synchronize_session=False
+        )
 
     db.commit()
 
@@ -277,17 +313,6 @@ def delete_feedback(id: int, db: Session = Depends(get_db)):
     db.delete(feedback)
     db.commit()
     return feedback
-
-@app.delete("/applications/{id}")
-def delete_application(id: int, db: Session = Depends(get_db)):
-    application = db.query(Application).filter(Application.id == id).first()
-    if application is None:
-        return JSONResponse(status_code=404, content={"message": "Заявка не найдена"})
-
-    db.query(ApplicationService).filter(ApplicationService.applicationId == id).delete()
-    db.query(Application).filter(Application.id == id).delete()
-    db.commit()
-    return {"message": "Заявка успешно удалена"}
 
 @app.delete("/{table_name}/{item_id}")
 async def delete_item(table_name: str, item_id: int, db: Session = Depends(get_db)):
@@ -322,6 +347,8 @@ async def get_items(table_name: str, db: Session = Depends(get_db)):
         items = db.query(Service).all()
     elif table_name == "application_duration":
         items = db.query(ApplicationDuration).all()
+    elif table_name == "rejection_reason":
+        items = db.query(RejectionReason).all()
     else:
         raise HTTPException(status_code=400, detail="Неверное имя таблицы")
 
@@ -376,6 +403,13 @@ async def add_item(table_name: str, item: ItemRequest, db: Session = Depends(get
             db.commit()
             db.refresh(new_item)
             return {"message": "Услуга добавлена", "id": new_item.id}
+
+        elif table_name == "rejection_reason":
+            new_item = RejectionReason(name=item.name)
+            db.add(new_item)
+            db.commit()
+            db.refresh(new_item)
+            return {"message": "Причина отказа добавлена", "id": new_item.id}
 
         else:
             raise HTTPException(status_code=400, detail="Неверное имя таблицы")
@@ -513,6 +547,7 @@ async def get_all_applications(db: Session = Depends(get_db)):
         .join(DisabilityCategorie, User.disabilityCategoriesId == DisabilityCategorie.id)
         .join(FamilyStatus, User.familyStatusId == FamilyStatus.id)
         .filter(Application.dateStart == date(1970, 1, 1), Application.dateEnd == date(1970, 1, 1))
+        .filter(Application.isRejected == False)
         .all()
     )
 
@@ -594,6 +629,7 @@ async def get_active_applications(db: Session = Depends(get_db)):
         .join(FamilyStatus, User.familyStatusId == FamilyStatus.id)
         .filter(Application.dateStart <= today, Application.dateEnd >= today)  # Фильтрация по текущей дате
         .distinct(Application.id)  # Обеспечиваем уникальность заявок
+        .filter(Application.isRejected == False)
         .all()
     )
 
@@ -889,6 +925,12 @@ async def get_all_feedbacks():
         feedbacks = db.query(Feedback).all()
         return feedbacks
 
+@app.get("/rejection_reason")
+async def get_all_rejection_reasons():
+    with Session(bind=engine, autoflush=False) as db:
+        rejection_reasons = db.query(RejectionReason).all()
+        return rejection_reasons
+
 @app.get("/feedbacks/{staff_id}", response_model=List[FeedbackResponse])
 async def get_feedback_for_staff(staff_id: int):
     with Session(bind=engine, autoflush=False) as db:
@@ -1034,7 +1076,10 @@ def add_application(application: application_response, db: Session = Depends(get
         dateStart=application.dateStart,
         dateEnd=application.dateEnd,
         staffId=application.staffId,
-        durationId=application.durationId
+        durationId=application.durationId,
+        isRejected=application.isRejected,
+        rejectedDate=application.rejectedDate,
+        rejectionReasonId=application.rejectionReasonId
     )
 
     try:
