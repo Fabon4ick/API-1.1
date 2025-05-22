@@ -168,7 +168,7 @@ async def connection_test():
     }
 
 @app.put("/applications/{id}/reject")
-def reject_application(
+async def reject_application(
     id: int,
     data: RejectionData,
     background_tasks: BackgroundTasks,
