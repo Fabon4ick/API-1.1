@@ -902,6 +902,12 @@ async def get_all_feedbacks():
         feedbacks = db.query(Feedback).all()
         return feedbacks
 
+@app.get("/rejection_reason")
+async def get_all_rejection_reasons():
+    with Session(bind=engine, autoflush=False) as db:
+        rejection_reasons = db.query(RejectionReason).all()
+        return rejection_reasons
+
 @app.get("/feedbacks/{staff_id}", response_model=List[FeedbackResponse])
 async def get_feedback_for_staff(staff_id: int):
     with Session(bind=engine, autoflush=False) as db:
@@ -1047,7 +1053,10 @@ def add_application(application: application_response, db: Session = Depends(get
         dateStart=application.dateStart,
         dateEnd=application.dateEnd,
         staffId=application.staffId,
-        durationId=application.durationId
+        durationId=application.durationId,
+        isRejected = application.isRejected,
+        rejectedDate = application.rejectedDate,
+        rejectionReasonId = application.rejectionReasonId
     )
 
     try:
