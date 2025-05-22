@@ -991,7 +991,8 @@ def get_active_user_applications(user_id: int, db: Session = Depends(get_db)):
             "dateStart": app.dateStart,
             "dateEnd": app.dateEnd,
             "userId": app.userId,
-            "staffId": app.staffId
+            "staffId": app.staffId,
+            "isRejected": app.isRejected
         }
         for app in applications
     ]
