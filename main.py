@@ -7,7 +7,7 @@ from sqlalchemy import or_, cast
 from starlette.responses import JSONResponse
 from database import *
 from database import Feedback, Application
-from datetime import datetime
+from datetime import datetime, timedelta
 from pydantic import BaseModel
 from typing import List, Optional
 import datetime as dt
@@ -21,6 +21,7 @@ import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import messaging
 from dotenv import load_dotenv
+import asyncio
 
 firebase_credentials = os.getenv("FIREBASE_CREDENTIALS_JSON")
 if not firebase_credentials:
@@ -829,6 +830,24 @@ async def update_application(
         }
     }
 
+
+async def delete_rejected_application_after_delay(application_id: int):
+    # Ждем 1 минуту
+    await asyncio.sleep(60)
+
+    # Используем SessionLocal из того же модуля, где определена app
+    db = SessionLocal()
+    try:
+        application = db.query(Application).filter(Application.id == application_id).first()
+        if application and application.isRejected:
+            db.delete(application)
+            db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"Error deleting application: {e}")
+    finally:
+        db.close()
+
 @app.put("/applications/{id}/reject")
 async def reject_application(id: int, data: RejectionData, background_tasks: BackgroundTasks, db: Session = Depends(get_db)
 ):
@@ -840,6 +859,8 @@ async def reject_application(id: int, data: RejectionData, background_tasks: Bac
     application.rejectedDate = data.rejectedDate
     application.rejectionReasonId = data.rejectionReasonId
     db.commit()
+
+    background_tasks.add_task(delete_rejected_application_after_delay, application.id)
 
     # Получаем токен пользователя
     user = db.query(User).filter(User.id == application.userId).first()
