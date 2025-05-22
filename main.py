@@ -3,7 +3,6 @@ import os
 import sys
 import time
 from multiprocessing.sharedctypes import synchronized
-
 import logger
 from sqlalchemy import or_, cast
 from starlette.responses import JSONResponse
@@ -23,6 +22,17 @@ import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import messaging
 from dotenv import load_dotenv
+
+logging.basicConfig(
+    level=logging.INFO,  # Можно поменять на DEBUG для более подробных логов
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout)  # Логи будут выводиться в stdout
+    ]
+)
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.DEBUG)
 
 firebase_credentials = os.getenv("FIREBASE_CREDENTIALS_JSON")
 if not firebase_credentials:
@@ -176,17 +186,6 @@ async def connection_test():
         "status" : 200,
         "message" : "Подключение установленно"
     }
-
-logging.basicConfig(
-    level=logging.INFO,  # Можно поменять на DEBUG для более подробных логов
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout)  # Логи будут выводиться в stdout
-    ]
-)
-
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.DEBUG)
 
 async def send_notification_with_fallback(fcm_token: str, title: str, body: str) -> bool:
     logger.debug(f"Starting notification send process for token: {fcm_token[:10]}...")
