@@ -1,9 +1,8 @@
 import json
 import os
-import sys
 import time
 from multiprocessing.sharedctypes import synchronized
-import logger
+
 from sqlalchemy import or_, cast
 from starlette.responses import JSONResponse
 from database import *
@@ -14,7 +13,7 @@ from typing import List, Optional
 import datetime as dt
 import base64
 import logging
-from fastapi import HTTPException, Depends, Query, Path, BackgroundTasks
+from fastapi import HTTPException, Depends, Query, Path
 from sqlalchemy.orm import Session, sessionmaker, joinedload
 from datetime import date
 import requests
@@ -23,31 +22,12 @@ from firebase_admin import credentials
 from firebase_admin import messaging
 from dotenv import load_dotenv
 
-logging.basicConfig(
-    level=logging.INFO,  # Можно поменять на DEBUG для более подробных логов
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout)  # Логи будут выводиться в stdout
-    ]
-)
-
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.DEBUG)
-
 firebase_credentials = os.getenv("FIREBASE_CREDENTIALS_JSON")
 if not firebase_credentials:
-    logger.error("Не найдены Firebase credentials")
     raise ValueError("Не найдены Firebase credentials")
-else:
-    logger.info("Firebase credentials успешно загружены")
 
-try:
-    cred = credentials.Certificate(json.loads(firebase_credentials))
-    firebase_admin.initialize_app(cred)
-    logger.info("Firebase Admin SDK инициализирован")
-except Exception as e:
-    logger.error(f"Ошибка инициализации Firebase Admin SDK: {e}")
-    raise
+cred = credentials.Certificate(json.loads(firebase_credentials))
+firebase_admin.initialize_app(cred)
 
 from fastapi import FastAPI
 
@@ -61,8 +41,7 @@ TABLE_MODELS = {
     "disease": Disease,
     "family_status": FamilyStatus,
     "service": Service,
-    "application_duration": ApplicationDuration,
-    "rejection_reason": RejectionReason
+    "application_duration": ApplicationDuration
 }
 
 class user_response(BaseModel):
@@ -96,9 +75,6 @@ class application_response(BaseModel):
     dateEnd: datetime
     staffId: int
     durationId: int
-    isRejected: bool
-    rejectedDate: Optional[date] = None
-    rejectionReasonId: Optional[int] = None
 
 class FeedbackResponse(BaseModel):
     comment: str
@@ -169,10 +145,6 @@ class ReplaceRequest(BaseModel):
 class FeedbackVisibilityUpdate(BaseModel):
     isVisible: bool
 
-class RejectionData(BaseModel):
-    rejectedDate: date
-    rejectionReasonId: int
-
 def get_db():
     db = SessionLocal()
     try:
@@ -187,21 +159,29 @@ async def connection_test():
         "message" : "Подключение установленно"
     }
 
+
+@app.get("/test_firebase")
+async def test_firebase():
+    try:
+        # Пробуем отправить тестовое уведомление
+        message = messaging.Message(
+            token="тестовый_токен",
+            notification=messaging.Notification(title="Test", body="Test")
+        )
+        messaging.send(message)
+        return {"status": "Firebase инициализирован корректно"}
+    except Exception as e:
+        return {"error": str(e)}
+
+logger = logging.getLogger(__name__)
+
 async def send_notification_with_fallback(fcm_token: str, title: str, body: str) -> bool:
-    logger.debug(f"Starting notification send process for token: {fcm_token[:10]}...")
     # Сначала пробуем через Firebase Admin
     if send_notification_to_user(fcm_token, title, body):
-        logger.debug("Notification sent via Firebase Admin")
         return True
 
-    logger.debug("Firebase Admin failed, trying HTTP API fallback")
     # Если не получилось, пробуем через HTTP API
-    result = send_push_notification(fcm_token, title, body)
-    if result:
-        logger.debug("Notification sent via HTTP API fallback")
-    else:
-        logger.error("Both Firebase Admin and HTTP API notification sending failed")
-    return result
+    return send_push_notification(fcm_token, title, body)
 
 def send_notification_to_user(fcm_token: str, title: str, body: str) -> bool:
     try:
@@ -210,15 +190,14 @@ def send_notification_to_user(fcm_token: str, title: str, body: str) -> bool:
             token=fcm_token
         )
         messaging.send(message)
-        logger.info(f"Notification successfully sent via Firebase Admin to token: {fcm_token[:10]}...")
+        logger.info(f"Notification sent to {fcm_token[:5]}...")
         return True
     except Exception as e:
-        logger.error(f"Firebase Admin error while sending notification to {fcm_token[:10]}...: {e}")
+        logger.error(f"Firebase Admin error: {str(e)}")
         return False
 
 def send_push_notification(token: str, title: str, body: str) -> bool:
     try:
-        logger.debug(f"Sending push notification via HTTP API to token: {token[:10]}...")
         response = requests.post(
             'https://fcm.googleapis.com/fcm/send',
             headers={
@@ -230,16 +209,14 @@ def send_push_notification(token: str, title: str, body: str) -> bool:
                 'notification': {'title': title, 'body': body},
                 'priority': 'high'
             },
-            timeout=5
+            timeout=5  # Таймаут для запроса
         )
-        if response.status_code == 200:
-            logger.info(f"Push notification sent successfully via HTTP API to token: {token[:10]}...")
-            return True
-        else:
-            logger.error(f"FCM HTTP error ({response.status_code}) for token {token[:10]}...: {response.text}")
-            return False
+        success = response.status_code == 200
+        if not success:
+            logger.error(f"FCM HTTP error: {response.status_code} - {response.text}")
+        return success
     except Exception as e:
-        logger.error(f"FCM HTTP connection error for token {token[:10]}...: {e}")
+        logger.error(f"FCM HTTP connection error: {str(e)}")
         return False
 
 @app.put("/replace_item/{table_name}")
@@ -280,10 +257,6 @@ async def replace_item(table_name: str, request: ReplaceRequest, db: Session = D
         db.query(Application).filter(Application.durationId == request.old_id).update(
             {Application.durationId: request.new_id}, synchronize_session=False
         )
-    elif table_name == "rejection_reason":
-        db.query(Application).filter(Application.rejectionReasonId == request.old_id).update(
-            {Application.rejectionReasonId: request.new_id}, synchronize_session=False
-        )
 
     db.commit()
 
@@ -304,6 +277,17 @@ def delete_feedback(id: int, db: Session = Depends(get_db)):
     db.delete(feedback)
     db.commit()
     return feedback
+
+@app.delete("/applications/{id}")
+def delete_application(id: int, db: Session = Depends(get_db)):
+    application = db.query(Application).filter(Application.id == id).first()
+    if application is None:
+        return JSONResponse(status_code=404, content={"message": "Заявка не найдена"})
+
+    db.query(ApplicationService).filter(ApplicationService.applicationId == id).delete()
+    db.query(Application).filter(Application.id == id).delete()
+    db.commit()
+    return {"message": "Заявка успешно удалена"}
 
 @app.delete("/{table_name}/{item_id}")
 async def delete_item(table_name: str, item_id: int, db: Session = Depends(get_db)):
@@ -338,8 +322,6 @@ async def get_items(table_name: str, db: Session = Depends(get_db)):
         items = db.query(Service).all()
     elif table_name == "application_duration":
         items = db.query(ApplicationDuration).all()
-    elif table_name == "rejection_reason":
-        items = db.query(RejectionReason).all()
     else:
         raise HTTPException(status_code=400, detail="Неверное имя таблицы")
 
@@ -394,13 +376,6 @@ async def add_item(table_name: str, item: ItemRequest, db: Session = Depends(get
             db.commit()
             db.refresh(new_item)
             return {"message": "Услуга добавлена", "id": new_item.id}
-
-        elif table_name == "rejection_reason":
-            new_item = RejectionReason(name=item.name)
-            db.add(new_item)
-            db.commit()
-            db.refresh(new_item)
-            return {"message": "Причина отказа добавлена", "id": new_item.id}
 
         else:
             raise HTTPException(status_code=400, detail="Неверное имя таблицы")
@@ -538,7 +513,6 @@ async def get_all_applications(db: Session = Depends(get_db)):
         .join(DisabilityCategorie, User.disabilityCategoriesId == DisabilityCategorie.id)
         .join(FamilyStatus, User.familyStatusId == FamilyStatus.id)
         .filter(Application.dateStart == date(1970, 1, 1), Application.dateEnd == date(1970, 1, 1))
-        .filter(Application.isRejected == False)
         .all()
     )
 
@@ -620,7 +594,6 @@ async def get_active_applications(db: Session = Depends(get_db)):
         .join(FamilyStatus, User.familyStatusId == FamilyStatus.id)
         .filter(Application.dateStart <= today, Application.dateEnd >= today)  # Фильтрация по текущей дате
         .distinct(Application.id)  # Обеспечиваем уникальность заявок
-        .filter(Application.isRejected == False)
         .all()
     )
 
@@ -843,31 +816,6 @@ async def update_application(
         }
     }
 
-@app.put("/applications/{id}/reject")
-async def reject_application(
-    id: int,
-    data: RejectionData,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
-):
-    application = db.query(Application).filter(Application.id == id).first()
-    if application is None:
-        raise HTTPException(status_code=404, detail="Заявка не найдена")
-
-    application.isRejected = True
-    application.rejectedDate = data.rejectedDate
-    application.rejectionReasonId = data.rejectionReasonId
-    db.commit()
-
-    # Получаем токен пользователя
-    user = db.query(User).filter(User.id == application.userId).first()
-    if user and user.fcmToken:
-        title = "Заявка отклонена"
-        body = "Ваша заявка была отклонена. Посмотрите причину в приложении."
-        background_tasks.add_task(send_notification_with_fallback, user.fcmToken, title, body)
-
-    return {"message": "Заявка отклонена успешно"}
-
 @app.get("/user/{phone_number}/{password}", response_model=user_response)
 def get_user_by_passport(phone_number: str, password: str, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.phoneNumber == phone_number, User.password == password).first()
@@ -940,12 +888,6 @@ async def get_all_feedbacks():
     with Session(bind=engine, autoflush=False) as db:
         feedbacks = db.query(Feedback).all()
         return feedbacks
-
-@app.get("/rejection_reason")
-async def get_all_rejection_reasons():
-    with Session(bind=engine, autoflush=False) as db:
-        rejection_reasons = db.query(RejectionReason).all()
-        return rejection_reasons
 
 @app.get("/feedbacks/{staff_id}", response_model=List[FeedbackResponse])
 async def get_feedback_for_staff(staff_id: int):
@@ -1092,10 +1034,7 @@ def add_application(application: application_response, db: Session = Depends(get
         dateStart=application.dateStart,
         dateEnd=application.dateEnd,
         staffId=application.staffId,
-        durationId=application.durationId,
-        isRejected=application.isRejected,
-        rejectedDate=application.rejectedDate,
-        rejectionReasonId=application.rejectionReasonId
+        durationId=application.durationId
     )
 
     try:
@@ -1283,5 +1222,3 @@ if __name__=="__main__":
     uvicorn.run(app, host="127.0.0.1", port=8000)
 
 # --host 100.70.255.173
-
-
