@@ -964,20 +964,27 @@ def get_civil(id: int, db: Session = Depends(get_db)):
 
 @app.get("/applications/{user_id}")
 def get_active_user_applications(user_id: int, db: Session = Depends(get_db)):
-    current_date = dt.date.today()  # Текущая дата
-    # Получаем только актуальные заявки, где dateEnd >= текущей дате
-    applications = db.query(Application).filter(
+    current_date = dt.date.today()
+    applications = db.query(
+        Application,
+        RejectionReason.name.label('rejection_reason_name')
+    ).outerjoin(
+        RejectionReason,
+        Application.rejectionReasonId == RejectionReason.id
+    ).filter(
         Application.userId == user_id,
         Application.dateEnd >= current_date
     ).all()
 
-    # Возвращаем даты, userId и staffId
     return [
         {
-            "dateStart": app.dateStart,
-            "dateEnd": app.dateEnd,
-            "userId": app.userId,
-            "staffId": app.staffId
+            "dateStart": app.Application.dateStart,
+            "dateEnd": app.Application.dateEnd,
+            "userId": app.Application.userId,
+            "staffId": app.Application.staffId,
+            "isRejected": app.Application.isRejected,
+            "rejectionReasonId": app.Application.rejectionReasonId,
+            "rejectionReasonName": app.rejection_reason_name if app.Application.isRejected else None
         }
         for app in applications
     ]
