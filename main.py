@@ -13,7 +13,7 @@ from typing import List, Optional
 import datetime as dt
 import base64
 import logging
-from fastapi import HTTPException, Depends, Query, Path
+from fastapi import HTTPException, Depends, Query, Path, BackgroundTasks
 from sqlalchemy.orm import Session, sessionmaker, joinedload
 from datetime import date
 import requests
@@ -830,11 +830,7 @@ async def update_application(
     }
 
 @app.put("/applications/{id}/reject")
-async def reject_application(
-    id: int,
-    data: RejectionData,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+async def reject_application(id: int, data: RejectionData, background_tasks: BackgroundTasks, db: Session = Depends(get_db)
 ):
     application = db.query(Application).filter(Application.id == id).first()
     if application is None:
