@@ -290,17 +290,6 @@ def delete_feedback(id: int, db: Session = Depends(get_db)):
     db.commit()
     return feedback
 
-@app.delete("/applications/{id}")
-def delete_application(id: int, db: Session = Depends(get_db)):
-    application = db.query(Application).filter(Application.id == id).first()
-    if application is None:
-        return JSONResponse(status_code=404, content={"message": "Заявка не найдена"})
-
-    db.query(ApplicationService).filter(ApplicationService.applicationId == id).delete()
-    db.query(Application).filter(Application.id == id).delete()
-    db.commit()
-    return {"message": "Заявка успешно удалена"}
-
 @app.delete("/{table_name}/{item_id}")
 async def delete_item(table_name: str, item_id: int, db: Session = Depends(get_db)):
     print(f"Получен запрос на удаление: таблица={table_name}, ID={item_id}")
@@ -334,6 +323,8 @@ async def get_items(table_name: str, db: Session = Depends(get_db)):
         items = db.query(Service).all()
     elif table_name == "application_duration":
         items = db.query(ApplicationDuration).all()
+    elif table_name == "rejection_reason":
+        items = db.query(RejectionReason).all()
     else:
         raise HTTPException(status_code=400, detail="Неверное имя таблицы")
 
