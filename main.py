@@ -1,8 +1,10 @@
 import json
 import os
+import sys
 import time
 from multiprocessing.sharedctypes import synchronized
 
+import logger
 from sqlalchemy import or_, cast
 from starlette.responses import JSONResponse
 from database import *
@@ -24,10 +26,18 @@ from dotenv import load_dotenv
 
 firebase_credentials = os.getenv("FIREBASE_CREDENTIALS_JSON")
 if not firebase_credentials:
-   raise ValueError("Не найдены Firebase credentials")
+    logger.error("Не найдены Firebase credentials")
+    raise ValueError("Не найдены Firebase credentials")
+else:
+    logger.info("Firebase credentials успешно загружены")
 
-cred = credentials.Certificate(json.loads(firebase_credentials))
-firebase_admin.initialize_app(cred)
+try:
+    cred = credentials.Certificate(json.loads(firebase_credentials))
+    firebase_admin.initialize_app(cred)
+    logger.info("Firebase Admin SDK инициализирован")
+except Exception as e:
+    logger.error(f"Ошибка инициализации Firebase Admin SDK: {e}")
+    raise
 
 from fastapi import FastAPI
 
@@ -167,15 +177,32 @@ async def connection_test():
         "message" : "Подключение установленно"
     }
 
+logging.basicConfig(
+    level=logging.INFO,  # Можно поменять на DEBUG для более подробных логов
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout)  # Логи будут выводиться в stdout
+    ]
+)
+
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.DEBUG)
 
 async def send_notification_with_fallback(fcm_token: str, title: str, body: str) -> bool:
+    logger.debug(f"Starting notification send process for token: {fcm_token[:10]}...")
     # Сначала пробуем через Firebase Admin
     if send_notification_to_user(fcm_token, title, body):
+        logger.debug("Notification sent via Firebase Admin")
         return True
 
+    logger.debug("Firebase Admin failed, trying HTTP API fallback")
     # Если не получилось, пробуем через HTTP API
-    return send_push_notification(fcm_token, title, body)
+    result = send_push_notification(fcm_token, title, body)
+    if result:
+        logger.debug("Notification sent via HTTP API fallback")
+    else:
+        logger.error("Both Firebase Admin and HTTP API notification sending failed")
+    return result
 
 def send_notification_to_user(fcm_token: str, title: str, body: str) -> bool:
     try:
@@ -184,14 +211,15 @@ def send_notification_to_user(fcm_token: str, title: str, body: str) -> bool:
             token=fcm_token
         )
         messaging.send(message)
-        logger.info(f"Notification sent to {fcm_token[:5]}...")
+        logger.info(f"Notification successfully sent via Firebase Admin to token: {fcm_token[:10]}...")
         return True
     except Exception as e:
-        logger.error(f"Firebase Admin error: {str(e)}")
+        logger.error(f"Firebase Admin error while sending notification to {fcm_token[:10]}...: {e}")
         return False
 
 def send_push_notification(token: str, title: str, body: str) -> bool:
     try:
+        logger.debug(f"Sending push notification via HTTP API to token: {token[:10]}...")
         response = requests.post(
             'https://fcm.googleapis.com/fcm/send',
             headers={
@@ -203,14 +231,16 @@ def send_push_notification(token: str, title: str, body: str) -> bool:
                 'notification': {'title': title, 'body': body},
                 'priority': 'high'
             },
-            timeout=5  # Таймаут для запроса
+            timeout=5
         )
-        success = response.status_code == 200
-        if not success:
-            logger.error(f"FCM HTTP error: {response.status_code} - {response.text}")
-        return success
+        if response.status_code == 200:
+            logger.info(f"Push notification sent successfully via HTTP API to token: {token[:10]}...")
+            return True
+        else:
+            logger.error(f"FCM HTTP error ({response.status_code}) for token {token[:10]}...: {response.text}")
+            return False
     except Exception as e:
-        logger.error(f"FCM HTTP connection error: {str(e)}")
+        logger.error(f"FCM HTTP connection error for token {token[:10]}...: {e}")
         return False
 
 @app.put("/replace_item/{table_name}")
@@ -813,6 +843,31 @@ async def update_application(
             "became_active": became_active
         }
     }
+
+@app.put("/applications/{id}/reject")
+async def reject_application(
+    id: int,
+    data: RejectionData,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    application = db.query(Application).filter(Application.id == id).first()
+    if application is None:
+        raise HTTPException(status_code=404, detail="Заявка не найдена")
+
+    application.isRejected = True
+    application.rejectedDate = data.rejectedDate
+    application.rejectionReasonId = data.rejectionReasonId
+    db.commit()
+
+    # Получаем токен пользователя
+    user = db.query(User).filter(User.id == application.userId).first()
+    if user and user.fcmToken:
+        title = "Заявка отклонена"
+        body = "Ваша заявка была отклонена. Посмотрите причину в приложении."
+        background_tasks.add_task(send_notification_with_fallback, user.fcmToken, title, body)
+
+    return {"message": "Заявка отклонена успешно"}
 
 @app.get("/user/{phone_number}/{password}", response_model=user_response)
 def get_user_by_passport(phone_number: str, password: str, db: Session = Depends(get_db)):
