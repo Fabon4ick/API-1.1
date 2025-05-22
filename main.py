@@ -41,7 +41,8 @@ TABLE_MODELS = {
     "disease": Disease,
     "family_status": FamilyStatus,
     "service": Service,
-    "application_duration": ApplicationDuration
+    "application_duration": ApplicationDuration,
+    "rejection_reason": RejectionReason
 }
 
 class user_response(BaseModel):
@@ -263,6 +264,10 @@ async def replace_item(table_name: str, request: ReplaceRequest, db: Session = D
     elif table_name == "application_duration":
         db.query(Application).filter(Application.durationId == request.old_id).update(
             {Application.durationId: request.new_id}, synchronize_session=False
+        )
+    elif table_name == "rejection_reason":
+        db.query(Application).filter(Application.rejectionReasonId == request.old_id).update(
+            {Application.rejectionReasonId: request.new_id}, synchronize_session=False
         )
 
     db.commit()
