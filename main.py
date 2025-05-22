@@ -75,6 +75,9 @@ class application_response(BaseModel):
     dateEnd: datetime
     staffId: int
     durationId: int
+    isRejected: bool
+    rejectedDate: Optional[date] = None
+    rejectionReasonId: Optional[int] = None
 
 class FeedbackResponse(BaseModel):
     comment: str
@@ -144,6 +147,10 @@ class ReplaceRequest(BaseModel):
 
 class FeedbackVisibilityUpdate(BaseModel):
     isVisible: bool
+
+class RejectionData(BaseModel):
+    rejectedDate: date
+    rejectionReasonId: int
 
 def get_db():
     db = SessionLocal()
