@@ -380,6 +380,13 @@ async def add_item(table_name: str, item: ItemRequest, db: Session = Depends(get
             db.refresh(new_item)
             return {"message": "Услуга добавлена", "id": new_item.id}
 
+        elif table_name == "rejection_reason":
+            new_item = RejectionReason(name=item.name)
+            db.add(new_item)
+            db.commit()
+            db.refresh(new_item)
+            return {"message": "Причина отказа добавлена", "id": new_item.id}
+
         else:
             raise HTTPException(status_code=400, detail="Неверное имя таблицы")
     except Exception as e:
@@ -516,6 +523,7 @@ async def get_all_applications(db: Session = Depends(get_db)):
         .join(DisabilityCategorie, User.disabilityCategoriesId == DisabilityCategorie.id)
         .join(FamilyStatus, User.familyStatusId == FamilyStatus.id)
         .filter(Application.dateStart == date(1970, 1, 1), Application.dateEnd == date(1970, 1, 1))
+        .filter(Application.isRejected == False)
         .all()
     )
 
@@ -597,6 +605,7 @@ async def get_active_applications(db: Session = Depends(get_db)):
         .join(FamilyStatus, User.familyStatusId == FamilyStatus.id)
         .filter(Application.dateStart <= today, Application.dateEnd >= today)  # Фильтрация по текущей дате
         .distinct(Application.id)  # Обеспечиваем уникальность заявок
+        .filter(Application.isRejected == False)
         .all()
     )
 
@@ -684,6 +693,7 @@ async def search_applications(
         .join(CivilCategory, UserCivilCategory.civilCategoryId == CivilCategory.id)
         .join(DisabilityCategorie, User.disabilityCategoriesId == DisabilityCategorie.id)
         .join(FamilyStatus, User.familyStatusId == FamilyStatus.id)
+        .filter(Application.isRejected == False)
         .filter(
             or_(
                 cast(User.id, String).ilike(f"%{search}%"),
