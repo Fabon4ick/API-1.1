@@ -13,7 +13,7 @@ from typing import List, Optional
 import datetime as dt
 import base64
 import logging
-from fastapi import HTTPException, Depends, Query, Path, BackgroundTasks, Request
+from fastapi import HTTPException, Depends, Query, Path, BackgroundTasks
 from sqlalchemy.orm import Session, sessionmaker, joinedload
 from datetime import date
 import requests
@@ -830,29 +830,23 @@ async def update_application(
         }
     }
 
-async def check_and_clean_rejected_apps(db: Session):
-    """Фоновая задача для очистки старых заявок"""
+
+@app.delete("/cleanup/rejected-applications")
+async def cleanup_rejected_applications(db: Session = Depends(get_db)):
     cutoff_time = datetime.now() - timedelta(minutes=1)
+
     rejected_apps = db.query(Application).filter(
         Application.isRejected == True,
         Application.rejectedDate <= cutoff_time
     ).all()
 
+    deleted_count = 0
     for app in rejected_apps:
         db.delete(app)
+        deleted_count += 1
+
     db.commit()
-
-
-@app.middleware("http")
-async def add_cleanup_middleware(request: Request, call_next):
-    """Middleware для запуска очистки при каждом запросе"""
-    response = await call_next(request)
-
-    # Запускаем в фоне после обработки основного запроса
-    if request.app.state.db:
-        asyncio.create_task(check_and_clean_rejected_apps(request.app.state.db))
-
-    return response
+    return {"message": f"Удалено {deleted_count} отклоненных заявок"}
 
 @app.put("/applications/{id}/reject")
 async def reject_application(id: int, data: RejectionData, background_tasks: BackgroundTasks, db: Session = Depends(get_db)
