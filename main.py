@@ -830,24 +830,6 @@ async def update_application(
         }
     }
 
-
-@app.delete("/cleanup/rejected-applications")
-async def cleanup_rejected_applications(db: Session = Depends(get_db)):
-    cutoff_time = datetime.now() - timedelta(minutes=1)
-
-    rejected_apps = db.query(Application).filter(
-        Application.isRejected == True,
-        Application.rejectedDate <= cutoff_time
-    ).all()
-
-    deleted_count = 0
-    for app in rejected_apps:
-        db.delete(app)
-        deleted_count += 1
-
-    db.commit()
-    return {"message": f"Удалено {deleted_count} отклоненных заявок"}
-
 @app.put("/applications/{id}/reject")
 async def reject_application(id: int, data: RejectionData, background_tasks: BackgroundTasks, db: Session = Depends(get_db)
 ):
@@ -1010,18 +992,29 @@ def get_active_user_applications(user_id: int, db: Session = Depends(get_db)):
 
 @app.get("/applications/any/{user_id}")
 def get_any_user_applications(user_id: int, db: Session = Depends(get_db)):
-    # Получаем все заявки пользователя по user_id
-    applications = db.query(Application).filter(
+    # Делаем join с таблицей RejectionReason чтобы получить текст причины
+    applications = db.query(
+        Application,
+        RejectionReason.name.label('rejection_reason_name')
+    ).outerjoin(
+        RejectionReason,
+        Application.rejectionReasonId == RejectionReason.id
+    ).filter(
         Application.userId == user_id
     ).all()
 
-    # Возвращаем список заявок
+    # Формируем ответ
     return [
         {
-            "dateStart": app.dateStart,
-            "dateEnd": app.dateEnd,
-            "userId": app.userId,
-            "staffId": app.staffId
+            "id": app.Application.id,
+            "dateStart": app.Application.dateStart,
+            "dateEnd": app.Application.dateEnd,
+            "userId": app.Application.userId,
+            "staffId": app.Application.staffId,
+            "isRejected": app.Application.isRejected,
+            "rejectedDate": app.Application.rejectedDate.isoformat() if app.Application.rejectedDate else None,
+            "rejectionReasonId": app.Application.rejectionReasonId,
+            "rejectionReasonName": app.rejection_reason_name if app.Application.isRejected else None
         }
         for app in applications
     ]
