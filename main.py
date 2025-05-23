@@ -13,7 +13,7 @@ from typing import List, Optional
 import datetime as dt
 import base64
 import logging
-from fastapi import HTTPException, Depends, Query, Path, BackgroundTasks
+from fastapi import HTTPException, Depends, Query, Path, BackgroundTasks, Request
 from sqlalchemy.orm import Session, sessionmaker, joinedload
 from datetime import date
 import requests
@@ -830,23 +830,29 @@ async def update_application(
         }
     }
 
+async def check_and_clean_rejected_apps(db: Session):
+    """Фоновая задача для очистки старых заявок"""
+    cutoff_time = datetime.now() - timedelta(minutes=1)
+    rejected_apps = db.query(Application).filter(
+        Application.isRejected == True,
+        Application.rejectedDate <= cutoff_time
+    ).all()
 
-async def delete_rejected_application_after_delay(application_id: int):
-    # Ждем 1 минуту
-    await asyncio.sleep(60)
+    for app in rejected_apps:
+        db.delete(app)
+    db.commit()
 
-    # Используем SessionLocal из того же модуля, где определена app
-    db = SessionLocal()
-    try:
-        application = db.query(Application).filter(Application.id == application_id).first()
-        if application and application.isRejected:
-            db.delete(application)
-            db.commit()
-    except Exception as e:
-        db.rollback()
-        print(f"Error deleting application: {e}")
-    finally:
-        db.close()
+
+@app.middleware("http")
+async def add_cleanup_middleware(request: Request, call_next):
+    """Middleware для запуска очистки при каждом запросе"""
+    response = await call_next(request)
+
+    # Запускаем в фоне после обработки основного запроса
+    if request.app.state.db:
+        asyncio.create_task(check_and_clean_rejected_apps(request.app.state.db))
+
+    return response
 
 @app.put("/applications/{id}/reject")
 async def reject_application(id: int, data: RejectionData, background_tasks: BackgroundTasks, db: Session = Depends(get_db)
@@ -859,8 +865,6 @@ async def reject_application(id: int, data: RejectionData, background_tasks: Bac
     application.rejectedDate = data.rejectedDate
     application.rejectionReasonId = data.rejectionReasonId
     db.commit()
-
-    background_tasks.add_task(delete_rejected_application_after_delay, application.id)
 
     # Получаем токен пользователя
     user = db.query(User).filter(User.id == application.userId).first()
