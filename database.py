@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, String, Date, Boolean, ForeignKey, Text, LargeBinary, create_engine, Float
-from sqlalchemy.orm import relationship, DeclarativeBase
+from sqlalchemy.orm import relationship, DeclarativeBase, sessionmaker
 import psycopg2
 
 class Base(DeclarativeBase):
@@ -159,3 +159,5 @@ class User(Base):
 engine = create_engine("postgresql://danil:iHnNUjL7sDmS3Gt3a0VLoW2tBPNeksVP@dpg-d0nj3vpr0fns7393qlm0-a.oregon-postgres.render.com/socialcompass_p4w0", echo=True)
 
 Base.metadata.create_all(engine)
+
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
