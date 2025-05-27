@@ -922,8 +922,8 @@ async def get_all_staffs():
         staff = db.query(Staff).all()
         return staff
 
-@app.get("/staffs/hidden")
-async def get_hidden_staffs():
+@app.get("/staffs/visible")
+async def get_visible_staffs():
     with Session(bind=engine, autoflush=False) as db:
         hidden_staff = db.query(Staff).filter(Staff.isVisible == False).all()
         return hidden_staff
@@ -1126,14 +1126,12 @@ def add_application(application: application_response, db: Session = Depends(get
 
 @app.post("/feedbacks")
 async def add_feedback(feedback: FeedbackRequest, db: Session = Depends(get_db)):
-    # Проверка наличия пользователя и сотрудника
     user = db.query(User).filter(User.id == feedback.userId).first()
     staff = db.query(Staff).filter(Staff.id == feedback.staffId).first()
 
     if not user or not staff:
         raise HTTPException(status_code=404, detail="User or Staff not found")
 
-    # Создание нового отзыва с isVisible = True
     new_feedback = Feedback(
         userId=feedback.userId,
         staffId=feedback.staffId,
