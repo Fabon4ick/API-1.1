@@ -857,17 +857,20 @@ def get_user_by_passport(phone_number: str, password: str, db: Session = Depends
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Получаем заявки пользователя со статусом отклонено
     rejected_apps = db.query(Application).filter(
         Application.userId == user.id,
         Application.isRejected == True,
         Application.rejectedDate != None
     ).all()
 
-    now = datetime.utcnow().date()  # Текущая дата
+    now = datetime.utcnow().date()
 
     for app in rejected_apps:
         if app.rejectedDate and (now - app.rejectedDate).days >= 1:
+            # Удаляем связанные ApplicationService
+            db.query(ApplicationService).filter(ApplicationService.applicationId == app.id).delete()
+
+            # Удаляем саму заявку
             db.delete(app)
 
     db.commit()
