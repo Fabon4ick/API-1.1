@@ -1026,34 +1026,34 @@ def get_civil(id: int, db: Session = Depends(get_db)):
 #         for app in applications
 #     ]
 #
-# @app.get("/applications/any/{user_id}")
-# def get_any_user_applications(user_id: int, db: Session = Depends(get_db)):
-#     # Делаем join с таблицей RejectionReason чтобы получить текст причины
-#     applications = db.query(
-#         Application,
-#         RejectionReason.name.label('rejection_reason_name')
-#     ).outerjoin(
-#         RejectionReason,
-#         Application.rejectionReasonId == RejectionReason.id
-#     ).filter(
-#         Application.userId == user_id
-#     ).all()
-#
-#     # Формируем ответ
-#     return [
-#         {
-#             "id": app.Application.id,
-#             "dateStart": app.Application.dateStart,
-#             "dateEnd": app.Application.dateEnd,
-#             "userId": app.Application.userId,
-#             "staffId": app.Application.staffId,
-#             "isRejected": app.Application.isRejected,
-#             "rejectedDate": app.Application.rejectedDate.isoformat() if app.Application.rejectedDate else None,
-#             "rejectionReasonId": app.Application.rejectionReasonId,
-#             "rejectionReasonName": app.rejection_reason_name if app.Application.isRejected else None
-#         }
-#         for app in applications
-#     ]
+@app.get("/applications/any/{user_id}")
+def get_any_user_applications(user_id: int, db: Session = Depends(get_db)):
+    # Делаем join с таблицей RejectionReason чтобы получить текст причины
+    applications = db.query(
+        Application,
+        RejectionReason.name.label('rejection_reason_name')
+    ).outerjoin(
+        RejectionReason,
+        Application.rejectionReasonId == RejectionReason.id
+    ).filter(
+        Application.userId == user_id
+    ).all()
+
+    # Формируем ответ
+    return [
+        {
+            "id": app.Application.id,
+            "dateStart": app.Application.dateStart,
+            "dateEnd": app.Application.dateEnd,
+            "userId": app.Application.userId,
+            "staffId": app.Application.staffId,
+            "isRejected": app.Application.isRejected,
+            "rejectedDate": app.Application.rejectedDate.isoformat() if app.Application.rejectedDate else None,
+            "rejectionReasonId": app.Application.rejectionReasonId,
+            "rejectionReasonName": app.rejection_reason_name if app.Application.isRejected else None
+        }
+        for app in applications
+    ]
 
 @app.get("/applications/latest/{user_id}")
 def get_latest_application(user_id: int, db: Session = Depends(get_db)):
