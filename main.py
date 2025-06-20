@@ -154,6 +154,10 @@ class RejectionData(BaseModel):
     rejectedDate: date
     rejectionReasonId: int
 
+class TokenUpdateRequest(BaseModel):
+    user_id: int
+    fcm_token: str
+
 def get_db():
     db = SessionLocal()
     try:
@@ -227,6 +231,19 @@ def send_push_notification(token: str, title: str, body: str) -> bool:
     except Exception as e:
         logger.error(f"FCM HTTP connection error: {str(e)}")
         return False
+
+@app.put("/update_fcm_token")
+def update_fcm_token(request: TokenUpdateRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == request.user_id).first()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    user.fcmToken = request.fcm_token
+    db.commit()
+    db.refresh(user)
+
+    return {"message": "FCM токен успешно обновлён", "user_id": user.id, "new_token": user.fcmToken}
 
 @app.put("/replace_item/{table_name}")
 async def replace_item(table_name: str, request: ReplaceRequest, db: Session = Depends(get_db)):
