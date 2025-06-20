@@ -232,14 +232,14 @@ def send_push_notification(token: str, title: str, body: str) -> bool:
         logger.error(f"FCM HTTP connection error: {str(e)}")
         return False
 
-@app.put("/update_fcm_token")
-def update_fcm_token(request: TokenUpdateRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.id == request.user_id).first()
+@app.put("/update_token/{user_id}/{token}")
+def update_fcm_token(user_id: int, token: str, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
 
     if not user:
         raise HTTPException(status_code=404, detail="Пользователь не найден")
 
-    user.fcmToken = request.fcm_token
+    user.fcmToken = token
     db.commit()
     db.refresh(user)
 
