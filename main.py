@@ -876,7 +876,7 @@ def get_user_by_passport(phone_number: str, password: str, db: Session = Depends
 
     now = datetime.utcnow().date()
 
-    # Удаление отклонённых заявок, прошедших 1 день
+    # Удаление отклонённых заявок, если с момента отклонения прошёл 1 день или больше
     rejected_apps = db.query(Application).filter(
         Application.userId == user.id,
         Application.isRejected == True,
@@ -888,10 +888,14 @@ def get_user_by_passport(phone_number: str, password: str, db: Session = Depends
             db.query(ApplicationService).filter(ApplicationService.applicationId == app.id).delete()
             db.delete(app)
 
-    # Удаление заявок с истёкшей датой окончания
+    # Удаление просроченных заявок, если дата окончания прошла
     expired_apps = db.query(Application).filter(
         Application.userId == user.id,
-        Application.dateEnd < now
+        Application.dateEnd != None,
+        Application.dateStart != None,
+        Application.dateEnd < now,
+        Application.dateStart != date(1970, 1, 1),
+        Application.dateEnd != date(1970, 1, 1)
     ).all()
 
     for app in expired_apps:
