@@ -874,21 +874,29 @@ def get_user_by_passport(phone_number: str, password: str, db: Session = Depends
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
 
+    now = datetime.utcnow().date()
+
+    # Удаление отклонённых заявок, прошедших 1 день
     rejected_apps = db.query(Application).filter(
         Application.userId == user.id,
         Application.isRejected == True,
         Application.rejectedDate != None
     ).all()
 
-    now = datetime.utcnow().date()
-
     for app in rejected_apps:
         if app.rejectedDate and (now - app.rejectedDate).days >= 1:
-            # Удаляем связанные ApplicationService
             db.query(ApplicationService).filter(ApplicationService.applicationId == app.id).delete()
-
-            # Удаляем саму заявку
             db.delete(app)
+
+    # Удаление заявок с истёкшей датой окончания
+    expired_apps = db.query(Application).filter(
+        Application.userId == user.id,
+        Application.dateEnd < now
+    ).all()
+
+    for app in expired_apps:
+        db.query(ApplicationService).filter(ApplicationService.applicationId == app.id).delete()
+        db.delete(app)
 
     db.commit()
 
