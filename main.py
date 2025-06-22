@@ -619,7 +619,7 @@ async def get_active_applications(db: Session = Depends(get_db)):
         .join(User, Application.userId == User.id)
         .join(ApplicationDuration, Application.durationId == ApplicationDuration.id)
         .outerjoin(Staff, Application.staffId == Staff.id)
-        .join(DisabilityCategorie, User.disabilityCategoriesId == DisabilityCategorie.id)
+        .outerjoin(DisabilityCategorie, User.disabilityCategoriesId == DisabilityCategorie.id)
         .join(FamilyStatus, User.familyStatusId == FamilyStatus.id)
         .filter(Application.dateStart <= today, Application.dateEnd >= today)  # Фильтрация по текущей дате
         .distinct(Application.id)  # Обеспечиваем уникальность заявок
@@ -676,7 +676,7 @@ async def get_active_applications(db: Session = Depends(get_db)):
             },
             "applicationServices": applicationServices,
             "applicationDuration": applicationDuration.name,
-            "userCivilCategories": userCivilCategories,
+            "userCivilCategories": userCivilCategories if userCivilCategories else None,
             "existingDiseases": diseases if diseases else None,
             "dateStart": app.dateStart.strftime("%Y-%m-%d"),
             "dateEnd": app.dateEnd.strftime("%Y-%m-%d"),
