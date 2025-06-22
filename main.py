@@ -1188,6 +1188,7 @@ def add_user(user: user_response, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(new_user)
     except Exception as e:
+        db.rollback()
         raise HTTPException(status_code=500, detail=f"Ошибка сохранения в базе данных: {e}")
 
     return new_user
