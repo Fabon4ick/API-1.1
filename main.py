@@ -480,6 +480,40 @@ async def replace_and_delete_staff(request: ReplaceRequest, db: Session = Depend
         "updated_applications": updated_count
     }
 
+@app.get("/visibleFeedbacks")
+async def get_hidden_feedbacks(db: Session = Depends(get_db)):
+    feedbacks = (
+        db.query(Feedback, User, Staff)
+        .join(User, Feedback.userId == User.id)
+        .join(Staff, Feedback.staffId == Staff.id)
+        .filter(Feedback.isVisible == False)
+        .all()
+    )
+
+    result = []
+    for feedback, user, staff in feedbacks:
+        result.append({
+            "commentId": feedback.id,
+            "user": {
+                "id": user.id,
+                "photo": user.photo,
+                "name": user.name,
+                "surname": user.surname,
+                "patronymic": user.patronymic
+            },
+            "comment": feedback.comment,
+            "rating": feedback.rating,
+            "isVisible": feedback.isVisible,
+            "staff": {
+                "id": staff.id if staff else None,
+                "name": staff.name if staff else None,
+                "surname": staff.surname if staff else None,
+                "patronymic": staff.patronymic if staff else None
+            }
+        })
+
+    return result
+
 @app.get("/feedbacks")
 async def get_all_feedbacks(db: Session = Depends(get_db)):
     feedbacks = (
