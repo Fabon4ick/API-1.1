@@ -538,7 +538,7 @@ async def get_all_applications(db: Session = Depends(get_db)):
         .join(User, Application.userId == User.id)
         .join(ApplicationDuration, Application.durationId == ApplicationDuration.id)
         .outerjoin(Staff, Application.staffId == Staff.id)
-        .join(DisabilityCategorie, User.disabilityCategoriesId == DisabilityCategorie.id)
+        .outerjoin(DisabilityCategorie, User.disabilityCategoriesId == DisabilityCategorie.id)
         .join(FamilyStatus, User.familyStatusId == FamilyStatus.id)
         .filter(Application.dateStart == date(1970, 1, 1), Application.dateEnd == date(1970, 1, 1))
         .filter(Application.isRejected == False)
@@ -554,7 +554,7 @@ async def get_all_applications(db: Session = Depends(get_db)):
             .filter(ExistingDisease.userId == user.id)
             .all()
         )
-        diseases = [d[0] for d in diseases_query]
+        diseases = [d[0] for d in diseases_query] if diseases_query else []
 
         userCivilCategories_query = (
             db.query(CivilCategory.name)
@@ -562,7 +562,7 @@ async def get_all_applications(db: Session = Depends(get_db)):
             .filter(UserCivilCategory.userId == user.id)
             .all()
         )
-        userCivilCategories = [d[0] for d in userCivilCategories_query]
+        userCivilCategories = [d[0] for d in userCivilCategories_query] if userCivilCategories_query else []
 
         applicationServices_query = (
             db.query(Service.name)
@@ -570,7 +570,7 @@ async def get_all_applications(db: Session = Depends(get_db)):
             .filter(ApplicationService.applicationId == app.id)
             .all()
         )
-        applicationServices = [d[0] for d in applicationServices_query]
+        applicationServices = [d[0] for d in applicationServices_query] if applicationServices_query else []
 
         result.append({
             "applicationId": app.id,
@@ -594,8 +594,8 @@ async def get_all_applications(db: Session = Depends(get_db)):
             },
             "applicationServices": applicationServices,
             "applicationDuration": applicationDuration.name,
-            "userCivilCategories": userCivilCategories,
-            "existingDiseases": diseases,
+            "userCivilCategories": userCivilCategories if userCivilCategories else None,
+            "existingDiseases": diseases if diseases else None,
             "dateStart": app.dateStart.strftime("%Y-%m-%d"),
             "dateEnd": app.dateEnd.strftime("%Y-%m-%d"),
             "isHaveReabilitation": "Да" if app.isHaveReabilitation else "Нет",
