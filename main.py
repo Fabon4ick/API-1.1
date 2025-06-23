@@ -1359,8 +1359,7 @@ def update_user(user_id: int, user: user_response, db: Session = Depends(get_db)
     if user.address is not None:
         existing_user.address = user.address
     existing_user.disabilityCategoriesId = user.disabilityCategoriesId
-    if user.pensionAmount is not None:
-        existing_user.pensionAmount = user.pensionAmount
+    existing_user.pensionAmount = user.pensionAmount
     if user.familyStatusId is not None:
         existing_user.familyStatusId = user.familyStatusId
     if user.password is not None:
