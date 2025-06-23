@@ -911,6 +911,11 @@ def get_user_by_passport(phone_number: str, password: str, db: Session = Depends
 
     now = datetime.utcnow().date()
 
+    def cleanup_user_data(user_id: int, db: Session):
+        """Удаляет связанные данные пользователя (ExistingDisease и UserCivilCategory)"""
+        db.query(ExistingDisease).filter(ExistingDisease.userId == user_id).delete()
+        db.query(UserCivilCategory).filter(UserCivilCategory.userId == user_id).delete()
+
     # Удаление отклонённых заявок, если с момента отклонения прошёл 1 день или больше
     rejected_apps = db.query(Application).filter(
         Application.userId == user.id,
@@ -920,7 +925,13 @@ def get_user_by_passport(phone_number: str, password: str, db: Session = Depends
 
     for app in rejected_apps:
         if app.rejectedDate and (now - app.rejectedDate).days >= 1:
+            # Удаление связанных услуг заявки
             db.query(ApplicationService).filter(ApplicationService.applicationId == app.id).delete()
+
+            # Удаление связанных данных пользователя
+            cleanup_user_data(user.id, db)
+
+            # Удаление самой заявки
             db.delete(app)
 
     # Удаление просроченных заявок, если дата окончания прошла
@@ -937,11 +948,8 @@ def get_user_by_passport(phone_number: str, password: str, db: Session = Depends
         # Удаление связанных услуг заявки
         db.query(ApplicationService).filter(ApplicationService.applicationId == app.id).delete()
 
-        # Удаление записей о заболеваниях пользователя
-        db.query(ExistingDisease).filter(ExistingDisease.userId == user.id).delete()
-
-        # Удаление записей о гражданских категориях пользователя
-        db.query(UserCivilCategory).filter(UserCivilCategory.userId == user.id).delete()
+        # Удаление связанных данных пользователя
+        cleanup_user_data(user.id, db)
 
         # Удаление самой заявки
         db.delete(app)
