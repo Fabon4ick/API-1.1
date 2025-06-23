@@ -902,6 +902,7 @@ async def reject_application(id: int, data: RejectionData, background_tasks: Bac
 
     return {"message": "Заявка отклонена успешно"}
 
+
 @app.get("/user/{phone_number}/{password}", response_model=user_response)
 def get_user_by_passport(phone_number: str, password: str, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.phoneNumber == phone_number, User.password == password).first()
@@ -933,7 +934,16 @@ def get_user_by_passport(phone_number: str, password: str, db: Session = Depends
     ).all()
 
     for app in expired_apps:
+        # Удаление связанных услуг заявки
         db.query(ApplicationService).filter(ApplicationService.applicationId == app.id).delete()
+
+        # Удаление записей о заболеваниях пользователя
+        db.query(ExistingDisease).filter(ExistingDisease.userId == user.id).delete()
+
+        # Удаление записей о гражданских категориях пользователя
+        db.query(UserCivilCategory).filter(UserCivilCategory.userId == user.id).delete()
+
+        # Удаление самой заявки
         db.delete(app)
 
     db.commit()
